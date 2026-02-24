@@ -394,24 +394,25 @@
         window.closeModal = closeModal;
 
         // ==========================================
-        // INSTANT IMAGE COMPRESSION (CRASH-PROOF)
+        // INSTANT IMAGE COMPRESSION (CRASH-PROOF & LIGHTNING FAST)
         // ==========================================
-        window.compressImageToBase64 = function(file, maxDim, callback) {
+        window.compressImageToBase64 = function(file, callback) {
             const img = new Image();
-            const objectUrl = URL.createObjectURL(file); // Prevents out-of-memory crashes on large mobile photos
+            const objectUrl = URL.createObjectURL(file); 
             
             img.onload = function() {
-                URL.revokeObjectURL(objectUrl); // Free memory immediately
+                URL.revokeObjectURL(objectUrl); 
                 
                 const canvas = document.createElement('canvas');
+                // Aggressive compression for instant Firestore saving (Under ~40KB)
+                const MAX_DIM = 400; 
                 let width = img.width;
                 let height = img.height;
 
-                // Scale proportionally
                 if (width > height) {
-                    if (width > maxDim) { height *= maxDim / width; width = maxDim; }
+                    if (width > MAX_DIM) { height *= MAX_DIM / width; width = MAX_DIM; }
                 } else {
-                    if (height > maxDim) { width *= maxDim / height; height = maxDim; }
+                    if (height > MAX_DIM) { width *= MAX_DIM / height; height = MAX_DIM; }
                 }
                 
                 canvas.width = width;
@@ -419,12 +420,12 @@
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0, width, height);
                 
-                // Return tiny base64 string
-                callback(canvas.toDataURL('image/jpeg', 0.6));
+                // Return tiny base64 string at 50% web quality
+                callback(canvas.toDataURL('image/jpeg', 0.5));
             };
             img.onerror = function(err) {
                 console.error("Image compression error:", err);
-                alert("Failed to load image. The file might be corrupted or in an unsupported format.");
+                alert("Failed to load image. The file might be corrupted.");
             };
             img.src = objectUrl;
         };
@@ -1356,7 +1357,7 @@
             lucide.createIcons();
         }
 
-        function openProductModal(id = null) {
+        window.openProductModal = function(id = null) {
             let p = id ? state.products.find(x => x.id === id) : { id: '', name: '', categoryId: '', price: '', sizes: '', image: '', isFeatured: false, isNewArrival: false };
             let sortedCats = sortCategoriesArray([...state.categories]);
             let catOptions = sortedCats.map(c => `<option value="${c.id}" ${p.categoryId === c.id ? 'selected' : ''}>${c.name}</option>`).join('');
@@ -1405,18 +1406,15 @@
                             </div>
                         </div>
 
+                        <!-- Lightning Fast Upload UI (No bulky preview) -->
                         <div class="bg-white p-6 rounded-2xl border-[3px] border-gray-200 shadow-sm">
                             <label class="block font-black text-gray-800 mb-4 uppercase tracking-wide">Product Photo</label>
-                            <div class="flex flex-col sm:flex-row items-center gap-6">
-                                <label class="cursor-pointer bg-gray-50 border-[4px] border-dashed border-gray-300 hover:bg-gray-100 hover:border-gray-400 transition-colors p-6 rounded-2xl flex flex-col items-center justify-center w-full sm:w-1/2 relative min-h-[200px] group">
-                                    <div class="bg-white p-4 rounded-full shadow-sm border-2 border-gray-200 mb-4 group-hover:scale-110 transition-transform"><i data-lucide="camera" class="w-8 h-8 text-gray-600" id="p_image_preview_loading_icon"></i></div>
-                                    <span class="text-sm font-black text-gray-700 uppercase tracking-widest text-center" id="p_image_preview_loading_text">Click to Select<br>Image</span>
-                                    <span id="p_image_preview_loading" class="hidden text-sm font-black text-blue-600 mt-2 absolute bottom-4 bg-blue-50 px-3 py-1 rounded-full border border-blue-200"><i class="lucide-loader animate-spin inline w-4 h-4 mr-1"></i> Optimizing...</span>
-                                    <input type="file" accept="image/*" class="hidden" onchange="handleImageUpload(this, 'p_image_preview')">
-                                </label>
-                                <div class="w-full sm:w-1/2 h-[200px] bg-gray-100 rounded-2xl border-[3px] border-gray-200 flex items-center justify-center p-2 relative overflow-hidden shadow-inner">
-                                    <span id="p_image_preview_placeholder" class="text-gray-400 font-bold text-sm uppercase tracking-widest absolute ${p.image ? 'hidden' : ''}">Preview</span>
-                                    <img id="p_image_preview" src="${p.image || ''}" class="w-full h-full object-contain rounded-xl z-10 drop-shadow-md ${p.image ? '' : 'hidden'}">
+                            <div class="relative bg-gray-50 border-[4px] border-dashed border-gray-300 hover:border-gray-500 hover:bg-gray-100 transition-colors p-4 rounded-2xl flex items-center gap-4 group">
+                                <input type="file" accept="image/*" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" onchange="handleImageUpload(this, 'p_image_base64', 'p_image_status')">
+                                <div class="bg-white p-3 rounded-full shadow-sm border-2 border-gray-200 group-hover:scale-110 transition-transform"><i data-lucide="camera" class="w-8 h-8 text-gray-600"></i></div>
+                                <div class="flex flex-col flex-1">
+                                    <span class="text-sm font-black text-gray-700 uppercase tracking-widest">Select Image File</span>
+                                    <span id="p_image_status" class="text-xs font-bold ${p.image ? 'text-green-600' : 'text-gray-500'} mt-1 truncate max-w-[200px] sm:max-w-full">${p.image ? '✓ Image Data Attached' : 'No file selected (Fast Upload)'}</span>
                                 </div>
                             </div>
                             <input type="hidden" id="p_image_base64" value="${p.image || ''}">
@@ -1433,43 +1431,39 @@
         }
         window.openProductModal = openProductModal;
 
-        function handleImageUpload(input, previewId) {
+        // Ultra-fast handling for all image inputs
+        window.handleImageUpload = function(input, hiddenInputId, statusId, previewId = null) {
             if (input.files && input.files[0]) {
                 const file = input.files[0];
-                const preview = document.getElementById(previewId);
-                const hiddenInput = document.getElementById(previewId.replace('_preview', '_base64'));
-                const loadingText = document.getElementById(previewId + '_loading');
-                const originalText = document.getElementById(previewId + '_loading_text');
-                const uploadIcon = document.getElementById(previewId + '_loading_icon');
-                const placeholder = document.getElementById(previewId + '_placeholder');
+                const hiddenInput = document.getElementById(hiddenInputId);
+                const statusEl = document.getElementById(statusId);
+                const previewEl = previewId ? document.getElementById(previewId) : null;
+                const placeholder = previewId ? document.getElementById(previewId + '_placeholder') : null;
 
-                if(loadingText) loadingText.classList.remove('hidden');
-                if(originalText) originalText.classList.add('hidden');
-                if(uploadIcon) uploadIcon.classList.add('hidden');
-
-                // Instant UI feedback before compression
-                if(preview) {
-                    preview.src = URL.createObjectURL(file);
-                    preview.classList.remove('hidden');
+                if (statusEl) {
+                    statusEl.innerHTML = '<i class="lucide-loader animate-spin w-4 h-4 inline mr-1 -mt-0.5 text-blue-600"></i><span class="text-blue-600">Optimizing...</span>';
                 }
-                if(placeholder) placeholder.classList.add('hidden');
 
+                // Compress locally before setting state
                 window.compressImageToBase64(file, (base64String) => {
-                    if(preview) {
-                        preview.src = base64String;
-                    }
-                    if(hiddenInput) hiddenInput.value = base64String;
+                    if (hiddenInput) hiddenInput.value = base64String;
                     
-                    if(loadingText) loadingText.classList.add('hidden');
-                    if(originalText) originalText.classList.remove('hidden');
-                    if(uploadIcon) uploadIcon.classList.remove('hidden');
-                    showToast("Image Optimized! 📸");
+                    if (statusEl) {
+                        statusEl.innerHTML = '<span class="text-green-600 font-black">✓ Ready to Save!</span>';
+                    }
+                    
+                    if (previewEl) {
+                        previewEl.src = base64String;
+                        previewEl.classList.remove('hidden');
+                        if (placeholder) placeholder.classList.add('hidden');
+                    }
+                    
+                    showToast("Image processed! 📸");
                 });
             }
-        }
-        window.handleImageUpload = handleImageUpload;
+        };
 
-        async function saveProduct(e, id) {
+        window.saveProduct = async function(e, id) {
             e.preventDefault();
             
             const btn = document.getElementById('save_product_btn');
@@ -1670,10 +1664,10 @@
                                 </div>
                                 <div class="flex items-center gap-6">
                                     <label class="cursor-pointer flex-1 bg-gray-50 border-[3px] border-dashed border-gray-300 hover:border-gray-500 hover:bg-gray-100 transition-colors p-6 rounded-2xl flex flex-col items-center justify-center relative min-h-[140px] group">
-                                        <div class="bg-white p-3 rounded-full shadow-sm border-2 border-gray-200 mb-3 group-hover:scale-110 transition-transform"><i data-lucide="upload" class="w-6 h-6 text-gray-500" id="s_logo_preview_loading_icon"></i></div>
-                                        <span class="text-xs font-black text-gray-600 uppercase tracking-widest text-center" id="s_logo_preview_loading_text">Select File</span>
-                                        <span id="s_logo_preview_loading" class="hidden text-xs font-black text-blue-600 mt-2 absolute bottom-3 bg-blue-50 px-3 py-1 rounded-full border border-blue-200"><i class="lucide-loader animate-spin inline w-4 h-4 mr-1"></i> Optimizing...</span>
-                                        <input type="file" accept="image/*" class="hidden" onchange="handleImageUpload(this, 's_logo_preview')">
+                                        <div class="bg-white p-3 rounded-full shadow-sm border-2 border-gray-200 mb-3 group-hover:scale-110 transition-transform"><i data-lucide="upload" class="w-6 h-6 text-gray-500"></i></div>
+                                        <span class="text-xs font-black text-gray-600 uppercase tracking-widest text-center">Select File</span>
+                                        <span id="s_logo_status" class="text-xs font-bold text-gray-500 mt-2 absolute bottom-2"></span>
+                                        <input type="file" accept="image/*" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" onchange="handleImageUpload(this, 's_logo_base64', 's_logo_status', 's_logo_preview')">
                                     </label>
                                     <div class="w-32 h-32 bg-gray-100 rounded-2xl border-[3px] border-gray-200 flex items-center justify-center p-2 relative shadow-inner overflow-hidden shrink-0">
                                         <span id="s_logo_preview_placeholder" class="text-gray-400 font-black text-[10px] uppercase tracking-widest absolute ${state.settings.logoImage ? 'hidden' : ''}">Preview</span>
@@ -1690,12 +1684,12 @@
                                 </div>
                                 <label class="cursor-pointer block bg-gray-50 border-[3px] border-dashed border-gray-300 hover:border-gray-500 hover:bg-gray-100 transition-colors p-6 rounded-2xl text-center relative group min-h-[160px] flex flex-col items-center justify-center overflow-hidden">
                                     <div class="z-10 bg-white/80 backdrop-blur-sm p-3 rounded-xl border-2 border-white shadow-sm group-hover:scale-105 transition-transform text-center mb-2">
-                                        <i data-lucide="image" class="w-6 h-6 mx-auto text-gray-600 mb-1" id="s_hero_preview_loading_icon"></i>
-                                        <span class="text-xs font-black text-gray-700 uppercase tracking-widest" id="s_hero_preview_loading_text">Upload Model Photo</span>
+                                        <i data-lucide="image" class="w-6 h-6 mx-auto text-gray-600 mb-1"></i>
+                                        <span class="text-xs font-black text-gray-700 uppercase tracking-widest">Upload Model Photo</span>
                                     </div>
-                                    <span id="s_hero_preview_loading" class="hidden text-xs font-black text-blue-600 z-10 bg-white px-3 py-1 rounded-full border border-blue-200 shadow-sm"><i class="lucide-loader animate-spin inline w-4 h-4 mr-1"></i> Optimizing...</span>
+                                    <span id="s_hero_status" class="z-10 text-xs font-bold text-gray-500 mt-2 bg-white/80 px-2 rounded"></span>
                                     <img id="s_hero_preview" src="${state.settings.heroImage || ''}" class="absolute inset-0 w-full h-full object-cover opacity-30 ${state.settings.heroImage ? '' : 'hidden'}">
-                                    <input type="file" accept="image/*" class="hidden" onchange="handleImageUpload(this, 's_hero_preview')">
+                                    <input type="file" accept="image/*" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20" onchange="handleImageUpload(this, 's_hero_base64', 's_hero_status', 's_hero_preview')">
                                 </label>
                                 <input type="hidden" id="s_hero_base64" value="${state.settings.heroImage || ''}">
                                 <p class="text-xs text-gray-400 font-bold mt-3 text-center">Overrides the default backpack/book graphics on the home screen.</p>
@@ -1730,9 +1724,9 @@
                                         <input type="hidden" id="s_qr_base64" value="${state.settings.bcelQrImage || ''}">
                                     </div>
                                     <label class="cursor-pointer w-full sm:w-64 bg-white border-[3px] border-gray-300 hover:border-gray-500 hover:bg-gray-50 transition-colors py-3 rounded-xl text-center relative shadow-sm">
-                                        <span class="text-sm font-black text-gray-700 uppercase tracking-widest" id="s_qr_preview_loading_text"><i data-lucide="upload" class="inline w-4 h-4 mr-1 -mt-1" id="s_qr_preview_loading_icon"></i> Select QR Image</span>
-                                        <span id="s_qr_preview_loading" class="hidden text-sm font-black text-blue-600"><i class="lucide-loader animate-spin inline w-4 h-4 mr-1"></i> Optimizing...</span>
-                                        <input type="file" accept="image/*" class="hidden" onchange="handleImageUpload(this, 's_qr_preview')">
+                                        <span class="text-sm font-black text-gray-700 uppercase tracking-widest"><i data-lucide="upload" class="inline w-4 h-4 mr-1 -mt-1"></i> Select QR Image</span>
+                                        <span id="s_qr_status" class="block text-xs font-bold text-gray-500 mt-1"></span>
+                                        <input type="file" accept="image/*" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" onchange="handleImageUpload(this, 's_qr_base64', 's_qr_status', 's_qr_preview')">
                                     </label>
                                 </div>
                             </div>
