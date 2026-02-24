@@ -394,35 +394,40 @@
         window.closeModal = closeModal;
 
         // ==========================================
-        // INSTANT IMAGE COMPRESSION (FOR FIRESTORE BASE64)
+        // INSTANT IMAGE COMPRESSION (CRASH-PROOF)
         // ==========================================
-        function compressImageToBase64(file, callback) {
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const img = new Image();
-                img.onload = function() {
-                    const canvas = document.createElement('canvas');
-                    const MAX_DIM = 600; 
-                    let width = img.width;
-                    let height = img.height;
+        window.compressImageToBase64 = function(file, maxDim, callback) {
+            const img = new Image();
+            const objectUrl = URL.createObjectURL(file); // Prevents out-of-memory crashes on large mobile photos
+            
+            img.onload = function() {
+                URL.revokeObjectURL(objectUrl); // Free memory immediately
+                
+                const canvas = document.createElement('canvas');
+                let width = img.width;
+                let height = img.height;
 
-                    if (width > height) {
-                        if (width > MAX_DIM) { height *= MAX_DIM / width; width = MAX_DIM; }
-                    } else {
-                        if (height > MAX_DIM) { width *= MAX_DIM / height; height = MAX_DIM; }
-                    }
-                    canvas.width = width;
-                    canvas.height = height;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0, width, height);
-                    
-                    callback(canvas.toDataURL('image/jpeg', 0.6));
+                // Scale proportionally
+                if (width > height) {
+                    if (width > maxDim) { height *= maxDim / width; width = maxDim; }
+                } else {
+                    if (height > maxDim) { width *= maxDim / height; height = maxDim; }
                 }
-                img.src = e.target.result;
-            }
-            reader.readAsDataURL(file);
-        }
-        window.compressImageToBase64 = compressImageToBase64;
+                
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                
+                // Return tiny base64 string
+                callback(canvas.toDataURL('image/jpeg', 0.6));
+            };
+            img.onerror = function(err) {
+                console.error("Image compression error:", err);
+                alert("Failed to load image. The file might be corrupted or in an unsupported format.");
+            };
+            img.src = objectUrl;
+        };
 
         function getCategoryGroups() {
             const groups = {};
@@ -1410,7 +1415,7 @@
                                     <input type="file" accept="image/*" class="hidden" onchange="handleImageUpload(this, 'p_image_preview')">
                                 </label>
                                 <div class="w-full sm:w-1/2 h-[200px] bg-gray-100 rounded-2xl border-[3px] border-gray-200 flex items-center justify-center p-2 relative overflow-hidden shadow-inner">
-                                    ${p.image ? '' : '<span class="text-gray-400 font-bold text-sm uppercase tracking-widest absolute">Preview</span>'}
+                                    <span id="p_image_preview_placeholder" class="text-gray-400 font-bold text-sm uppercase tracking-widest absolute ${p.image ? 'hidden' : ''}">Preview</span>
                                     <img id="p_image_preview" src="${p.image || ''}" class="w-full h-full object-contain rounded-xl z-10 drop-shadow-md ${p.image ? '' : 'hidden'}">
                                 </div>
                             </div>
@@ -1436,15 +1441,22 @@
                 const loadingText = document.getElementById(previewId + '_loading');
                 const originalText = document.getElementById(previewId + '_loading_text');
                 const uploadIcon = document.getElementById(previewId + '_loading_icon');
+                const placeholder = document.getElementById(previewId + '_placeholder');
 
                 if(loadingText) loadingText.classList.remove('hidden');
                 if(originalText) originalText.classList.add('hidden');
                 if(uploadIcon) uploadIcon.classList.add('hidden');
 
+                // Instant UI feedback before compression
+                if(preview) {
+                    preview.src = URL.createObjectURL(file);
+                    preview.classList.remove('hidden');
+                }
+                if(placeholder) placeholder.classList.add('hidden');
+
                 window.compressImageToBase64(file, (base64String) => {
                     if(preview) {
                         preview.src = base64String;
-                        preview.classList.remove('hidden');
                     }
                     if(hiddenInput) hiddenInput.value = base64String;
                     
@@ -1455,7 +1467,9 @@
                 });
             }
         }
-        window.saveProduct = async function(e, id) {
+        window.handleImageUpload = handleImageUpload;
+
+        async function saveProduct(e, id) {
             e.preventDefault();
             
             const btn = document.getElementById('save_product_btn');
@@ -1662,7 +1676,7 @@
                                         <input type="file" accept="image/*" class="hidden" onchange="handleImageUpload(this, 's_logo_preview')">
                                     </label>
                                     <div class="w-32 h-32 bg-gray-100 rounded-2xl border-[3px] border-gray-200 flex items-center justify-center p-2 relative shadow-inner overflow-hidden shrink-0">
-                                        ${state.settings.logoImage ? '' : '<span class="text-gray-400 font-black text-[10px] uppercase tracking-widest absolute">Preview</span>'}
+                                        <span id="s_logo_preview_placeholder" class="text-gray-400 font-black text-[10px] uppercase tracking-widest absolute ${state.settings.logoImage ? 'hidden' : ''}">Preview</span>
                                         <img id="s_logo_preview" src="${state.settings.logoImage || ''}" class="w-full h-full object-contain drop-shadow-md ${state.settings.logoImage ? '' : 'hidden'}">
                                         <input type="hidden" id="s_logo_base64" value="${state.settings.logoImage || ''}">
                                     </div>
@@ -1711,12 +1725,12 @@
                                 </div>
                                 <div class="flex flex-col items-center">
                                     <div class="w-full sm:w-64 h-64 bg-gray-100 rounded-2xl border-[3px] border-gray-200 flex items-center justify-center p-3 relative shadow-inner mb-4 overflow-hidden">
-                                        ${state.settings.bcelQrImage ? '' : '<i data-lucide="qr-code" class="w-16 h-16 text-gray-300 absolute"></i>'}
+                                        <i id="s_qr_preview_placeholder" data-lucide="qr-code" class="w-16 h-16 text-gray-300 absolute ${state.settings.bcelQrImage ? 'hidden' : ''}"></i>
                                         <img id="s_qr_preview" src="${state.settings.bcelQrImage || ''}" class="w-full h-full object-contain z-10 ${state.settings.bcelQrImage ? '' : 'hidden'}">
                                         <input type="hidden" id="s_qr_base64" value="${state.settings.bcelQrImage || ''}">
                                     </div>
                                     <label class="cursor-pointer w-full sm:w-64 bg-white border-[3px] border-gray-300 hover:border-gray-500 hover:bg-gray-50 transition-colors py-3 rounded-xl text-center relative shadow-sm">
-                                        <span class="text-sm font-black text-gray-700 uppercase tracking-widest" id="s_qr_preview_loading_text"><i data-lucide="upload" class="inline w-4 h-4 mr-1 -mt-1"></i> Select QR Image</span>
+                                        <span class="text-sm font-black text-gray-700 uppercase tracking-widest" id="s_qr_preview_loading_text"><i data-lucide="upload" class="inline w-4 h-4 mr-1 -mt-1" id="s_qr_preview_loading_icon"></i> Select QR Image</span>
                                         <span id="s_qr_preview_loading" class="hidden text-sm font-black text-blue-600"><i class="lucide-loader animate-spin inline w-4 h-4 mr-1"></i> Optimizing...</span>
                                         <input type="file" accept="image/*" class="hidden" onchange="handleImageUpload(this, 's_qr_preview')">
                                     </label>
