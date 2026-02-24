@@ -54,7 +54,6 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, doc, setDoc, getDocs, deleteDoc, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
 
         // ==========================================
         // 1. FIREBASE CONFIGURATION & INIT
@@ -71,7 +70,6 @@
         const app = initializeApp(firebaseConfig);
         const auth = getAuth(app);
         const db = getFirestore(app);
-        const storage = getStorage(app);
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'neerada-store-app';
 
         // Paths for storing database records
@@ -112,7 +110,7 @@
         const formatLAKManual = (num) => Number(num).toLocaleString('en-US') + ' LAK';
 
         // ==========================================
-        // 3. DATABASE & STORAGE LAYER
+        // 3. DATABASE LAYER
         // ==========================================
         async function dbGetAll(colName) {
             const snapshot = await getDocs(getColRef(colName));
@@ -265,35 +263,37 @@
             document.getElementById('modal-container').innerHTML = '';
         }
 
-        // Extremely fast image compressor using Blob and Object URLs
-        window.compressImageToBlob = function(file, maxWidth, maxHeight, quality) {
-            return new Promise((resolve, reject) => {
+        // ==========================================
+        // INSTANT IMAGE COMPRESSION (FOR FIRESTORE BASE64)
+        // ==========================================
+        // Firestore limits documents to 1MB. 
+        // We compress heavily to ensure fast, instant saves under ~100KB.
+        window.compressImageToBase64 = function(file, callback) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
                 const img = new Image();
-                img.onload = () => {
-                    URL.revokeObjectURL(img.src); // Free up browser memory instantly
+                img.onload = function() {
                     const canvas = document.createElement('canvas');
+                    const MAX_DIM = 600; // Aggressive compression size limit for Firestore
                     let width = img.width;
                     let height = img.height;
 
                     if (width > height) {
-                        if (width > maxWidth) { height *= maxWidth / width; width = maxWidth; }
+                        if (width > MAX_DIM) { height *= MAX_DIM / width; width = MAX_DIM; }
                     } else {
-                        if (height > maxHeight) { width *= maxHeight / height; height = maxHeight; }
+                        if (height > MAX_DIM) { width *= MAX_DIM / height; height = MAX_DIM; }
                     }
                     canvas.width = width;
                     canvas.height = height;
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, width, height);
                     
-                    // Convert directly to Blob for fast upload
-                    canvas.toBlob((blob) => {
-                        resolve(blob);
-                    }, 'image/jpeg', quality);
-                };
-                img.onerror = reject;
-                // createObjectURL is instantly read by the browser unlike slow Base64 string conversions
-                img.src = URL.createObjectURL(file); 
-            });
+                    // Return highly optimized Base64 string at 60% quality
+                    callback(canvas.toDataURL('image/jpeg', 0.6));
+                }
+                img.src = e.target.result;
+            }
+            reader.readAsDataURL(file);
         };
 
         // Parse categories into groups based on naming convention "Main (Sub)"
@@ -353,7 +353,7 @@
                         <!-- Left: Brand -->
                         <div class="flex items-center gap-2 sm:gap-3 cursor-pointer group" onclick="navigate('home')">
                             ${logoHtml}
-                            <h1 class="text-mcYellow text-2xl sm:text-3xl font-black tracking-widest drop-shadow-md" style="font-family: 'Arial Black', sans-serif;">NEERADA</h1>
+                            <h1 class="text-mcYellow text-xl sm:text-2xl font-black tracking-widest drop-shadow-md whitespace-nowrap" style="font-family: 'Arial Black', sans-serif;">Neerada Store</h1>
                         </div>
 
                         <!-- Center: Desktop Links -->
@@ -388,7 +388,7 @@
 
                 <!-- Compact Footer -->
                 <footer class="bg-mcRed text-white text-center py-5 border-t-4 border-mcYellow mt-auto">
-                    <h3 class="font-extrabold text-xl text-mcYellow tracking-wider drop-shadow-sm mb-1">NEERADA STORE</h3>
+                    <h3 class="font-extrabold text-xl text-mcYellow tracking-wider drop-shadow-sm mb-1">Neerada Store</h3>
                     <p class="font-bold text-xs opacity-80">&copy; 2026 Neerada Store. All rights reserved.</p>
                 </footer>
             `;
@@ -1131,12 +1131,12 @@
                                 <label class="cursor-pointer bg-gray-100 border-2 border-dashed border-gray-300 hover:bg-gray-200 transition p-4 rounded-xl flex flex-col items-center justify-center w-full relative">
                                     <i data-lucide="upload-cloud" class="w-8 h-8 text-gray-500 mb-2" id="p_image_preview_loading_icon"></i>
                                     <span class="text-sm font-bold text-gray-600" id="p_image_preview_loading_text">Select Image File</span>
-                                    <span id="p_image_preview_loading" class="hidden text-sm font-bold text-blue-600 mt-1 absolute bottom-2"><i class="lucide-loader animate-spin inline w-4 h-4"></i> Uploading...</span>
-                                    <input type="file" accept="image/*" class="hidden" onchange="handleImageUpload(this, 'p_image_preview', 'products')">
+                                    <span id="p_image_preview_loading" class="hidden text-sm font-bold text-blue-600 mt-1 absolute bottom-2"><i class="lucide-loader animate-spin inline w-4 h-4"></i> Processing...</span>
+                                    <input type="file" accept="image/*" class="hidden" onchange="handleImageUpload(this, 'p_image_preview')">
                                 </label>
                             </div>
                             <img id="p_image_preview" src="${p.image || ''}" class="mt-4 w-full max-h-48 object-contain rounded-xl border border-gray-200 bg-gray-50 shadow-inner ${p.image ? '' : 'hidden'}">
-                            <input type="hidden" id="p_image_url" value="${p.image || ''}">
+                            <input type="hidden" id="p_image_base64" value="${p.image || ''}">
                         </div>
                     </div>
                     <div class="p-6 bg-gray-50 border-t-2 border-gray-200 shrink-0 flex gap-3">
@@ -1147,50 +1147,32 @@
             `);
         }
 
-        // Fast Firebase direct upload using ultra-fast Blob compression
-        window.handleImageUpload = async function(input, previewId, pathPrefix) {
+        // Fast local Base64 generation avoiding network trips
+        window.handleImageUpload = function(input, previewId) {
             if (input.files && input.files[0]) {
                 const file = input.files[0];
                 const preview = document.getElementById(previewId);
-                const hiddenInput = document.getElementById(previewId.replace('_preview', '_url'));
+                const hiddenInput = document.getElementById(previewId.replace('_preview', '_base64'));
                 const loadingText = document.getElementById(previewId + '_loading');
                 const originalText = document.getElementById(previewId + '_loading_text');
                 const uploadIcon = document.getElementById(previewId + '_loading_icon');
 
-                // 1. Show UI Loading states
                 if(loadingText) loadingText.classList.remove('hidden');
                 if(originalText) originalText.classList.add('hidden');
                 if(uploadIcon) uploadIcon.classList.add('hidden');
 
-                // 2. Instantly show local preview without blocking UI
-                if(preview) {
-                    preview.src = URL.createObjectURL(file);
-                    preview.classList.remove('hidden');
-                }
-
-                try {
-                    // 3. Compress locally into Blob (Removes lag)
-                    const compressedBlob = await window.compressImageToBlob(file, 800, 800, 0.7);
+                window.compressImageToBase64(file, (base64String) => {
+                    if(preview) {
+                        preview.src = base64String;
+                        preview.classList.remove('hidden');
+                    }
+                    if(hiddenInput) hiddenInput.value = base64String;
                     
-                    // 4. Upload bytes directly to Firebase
-                    const safeName = file.name.replace(/[^a-zA-Z0-9]/g, '');
-                    const storageRef = ref(storage, `${pathPrefix}/${Date.now()}_${safeName}.jpg`);
-                    
-                    await uploadBytes(storageRef, compressedBlob);
-                    const url = await getDownloadURL(storageRef);
-
-                    // 5. Store ready URL
-                    if(hiddenInput) hiddenInput.value = url;
-                    showToast("Upload Successful! ✅");
-                } catch(e) {
-                    alert("Upload failed. Error: " + e.message);
-                    console.error(e);
-                } finally {
-                    // Reset UI
                     if(loadingText) loadingText.classList.add('hidden');
                     if(originalText) originalText.classList.remove('hidden');
                     if(uploadIcon) uploadIcon.classList.remove('hidden');
-                }
+                    showToast("Image Optimized & Ready! 📸");
+                });
             }
         };
 
@@ -1203,7 +1185,7 @@
             btn.disabled = true;
 
             const newId = id || 'prod_' + Date.now();
-            let finalImageUrl = document.getElementById('p_image_url').value;
+            let finalImageBase64 = document.getElementById('p_image_base64').value;
             
             try {
                 const product = {
@@ -1212,7 +1194,7 @@
                     categoryId: document.getElementById('p_cat').value,
                     price: Number(document.getElementById('p_price').value),
                     sizes: document.getElementById('p_sizes').value.trim(),
-                    image: finalImageUrl
+                    image: finalImageBase64
                 };
             
                 await dbPut('products', product);
@@ -1224,7 +1206,7 @@
                 showToast('Product Saved successfully!');
                 adminTab('products');
             } catch (err) {
-                alert("Failed to save to Firebase! Error: " + err.message);
+                alert("Failed to save to Firestore! Ensure the image isn't too large. Error: " + err.message);
                 btn.innerText = originalText;
                 btn.disabled = false;
             }
@@ -1352,16 +1334,16 @@
                         <div class="border-t pt-5">
                             <label class="block font-bold text-gray-600 mb-2 text-sm uppercase tracking-wider flex justify-between">
                                 School Logo & Favicon
-                                <button onclick="saveSettingRawAndLogo('logoImage', document.getElementById('s_logo_url').value)" class="text-mcRed hover:text-red-700">Save Logo</button>
+                                <button onclick="saveSettingRawAndLogo('logoImage', document.getElementById('s_logo_base64').value)" class="text-mcRed hover:text-red-700">Save Logo</button>
                             </label>
                             <label class="cursor-pointer block border-2 border-dashed border-gray-300 bg-white hover:bg-gray-100 p-4 rounded-xl text-center transition relative">
                                 <i data-lucide="image" class="w-8 h-8 mx-auto text-gray-400 mb-2" id="s_logo_preview_loading_icon"></i>
                                 <span class="text-sm font-bold text-gray-600" id="s_logo_preview_loading_text">Upload Image File</span>
-                                <span id="s_logo_preview_loading" class="hidden text-sm font-bold text-blue-600 mt-1 absolute bottom-2 left-0 right-0"><i class="lucide-loader animate-spin inline w-4 h-4"></i> Uploading...</span>
-                                <input type="file" accept="image/*" class="hidden" onchange="handleImageUpload(this, 's_logo_preview', 'settings')">
+                                <span id="s_logo_preview_loading" class="hidden text-sm font-bold text-blue-600 mt-1 absolute bottom-2 left-0 right-0"><i class="lucide-loader animate-spin inline w-4 h-4"></i> Processing...</span>
+                                <input type="file" accept="image/*" class="hidden" onchange="handleImageUpload(this, 's_logo_preview')">
                             </label>
                             <img id="s_logo_preview" src="${state.settings.logoImage || ''}" class="mt-3 mx-auto max-h-24 object-contain rounded-xl border border-gray-200 ${state.settings.logoImage ? '' : 'hidden'}">
-                            <input type="hidden" id="s_logo_url" value="${state.settings.logoImage || ''}">
+                            <input type="hidden" id="s_logo_base64" value="${state.settings.logoImage || ''}">
                         </div>
                     </div>
 
@@ -1380,16 +1362,16 @@
                         <div class="border-t pt-5">
                             <label class="block font-bold text-gray-600 mb-2 text-sm uppercase tracking-wider flex justify-between">
                                 BCEL OnePay QR
-                                <button onclick="saveSettingRaw('bcelQrImage', document.getElementById('s_qr_url').value)" class="text-mcRed hover:text-red-700">Save QR</button>
+                                <button onclick="saveSettingRaw('bcelQrImage', document.getElementById('s_qr_base64').value)" class="text-mcRed hover:text-red-700">Save QR</button>
                             </label>
                             <label class="cursor-pointer block border-2 border-dashed border-gray-300 bg-white hover:bg-gray-100 p-4 rounded-xl text-center transition relative">
                                 <i data-lucide="qr-code" class="w-8 h-8 mx-auto text-gray-400 mb-2" id="s_qr_preview_loading_icon"></i>
                                 <span class="text-sm font-bold text-gray-600" id="s_qr_preview_loading_text">Upload Image File</span>
-                                <span id="s_qr_preview_loading" class="hidden text-sm font-bold text-blue-600 mt-1 absolute bottom-2 left-0 right-0"><i class="lucide-loader animate-spin inline w-4 h-4"></i> Uploading...</span>
-                                <input type="file" accept="image/*" class="hidden" onchange="handleImageUpload(this, 's_qr_preview', 'settings')">
+                                <span id="s_qr_preview_loading" class="hidden text-sm font-bold text-blue-600 mt-1 absolute bottom-2 left-0 right-0"><i class="lucide-loader animate-spin inline w-4 h-4"></i> Processing...</span>
+                                <input type="file" accept="image/*" class="hidden" onchange="handleImageUpload(this, 's_qr_preview')">
                             </label>
                             <img id="s_qr_preview" src="${state.settings.bcelQrImage || ''}" class="mt-3 mx-auto max-h-40 rounded-xl shadow-md border border-gray-200 ${state.settings.bcelQrImage ? '' : 'hidden'}">
-                            <input type="hidden" id="s_qr_url" value="${state.settings.bcelQrImage || ''}">
+                            <input type="hidden" id="s_qr_base64" value="${state.settings.bcelQrImage || ''}">
                         </div>
                     </div>
 
