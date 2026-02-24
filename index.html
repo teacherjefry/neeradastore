@@ -830,10 +830,10 @@
                                 <label class="cursor-pointer bg-gray-100 border-2 border-dashed border-gray-300 hover:bg-gray-200 transition p-4 rounded-xl flex flex-col items-center justify-center w-full">
                                     <i data-lucide="upload-cloud" class="w-8 h-8 text-gray-500 mb-2"></i>
                                     <span class="text-sm font-bold text-gray-600">Select Image File</span>
-                                    <input type="file" id="p_image" accept="image/*" class="hidden" onchange="handleImageUpload(this, 'p_img_preview')">
+                                    <input type="file" id="p_image" accept="image/*" class="hidden" onchange="handleImageUpload(this, 'p_image_preview')">
                                 </label>
                             </div>
-                            <img id="p_img_preview" src="${p.image || ''}" class="mt-4 w-full max-h-48 object-contain rounded-xl border border-gray-200 bg-gray-50 shadow-inner ${p.image ? '' : 'hidden'}">
+                            <img id="p_image_preview" src="${p.image || ''}" class="mt-4 w-full max-h-48 object-contain rounded-xl border border-gray-200 bg-gray-50 shadow-inner ${p.image ? '' : 'hidden'}">
                             <input type="hidden" id="p_image_base64" value="${p.image || ''}">
                         </div>
                     </div>
