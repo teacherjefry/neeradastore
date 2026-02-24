@@ -1,0 +1,1216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neerada Store</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        mcRed: '#DA291C',
+                        mcYellow: '#FFC72C',
+                    },
+                    fontFamily: {
+                        sans: ['Arial', 'Helvetica', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Hide scrollbar for category pills but keep functionality */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        /* Smooth transitions */
+        .page-transition {
+            animation: fadeIn 0.3s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="bg-yellow-50 text-gray-900 font-sans antialiased min-h-screen flex flex-col">
+
+    <!-- Main App Container -->
+    <div id="app" class="flex-1 flex flex-col w-full"></div>
+
+    <!-- Modals Container -->
+    <div id="modal-container"></div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, getDocs, deleteDoc, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getStorage, ref, uploadString, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
+
+        // ==========================================
+        // 1. FIREBASE CONFIGURATION & INIT
+        // ==========================================
+        const firebaseConfig = {
+            apiKey: "AIzaSyA_iNMD5w-gm79PXnK-0I49b5l3JapC1y0",
+            authDomain: "neerada-prom.firebaseapp.com",
+            projectId: "neerada-prom",
+            storageBucket: "neerada-prom.firebasestorage.app",
+            messagingSenderId: "716982986904",
+            appId: "1:716982986904:web:eb3d3715788634472ec8ed"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const storage = getStorage(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'neerada-store-app';
+
+        // Paths for storing database records
+        const getColRef = (colName) => collection(db, 'artifacts', appId, 'public', 'data', colName);
+
+        // ==========================================
+        // 2. STATE & CONSTANTS
+        // ==========================================
+        const defaultCategories = [
+            { id: 'cat_su_pk', name: 'School Uniforms (Pre-K)' },
+            { id: 'cat_su_k', name: 'School Uniforms (K1 - K3)' },
+            { id: 'cat_su_p', name: 'School Uniforms (P1 - P5)' },
+            { id: 'cat_su_s', name: 'School Uniforms (S1 - S7)' },
+            { id: 'cat_pe_pk', name: 'PE Uniforms (Pre-K)' },
+            { id: 'cat_pe_k', name: 'PE Uniforms (K1 - K3)' },
+            { id: 'cat_pe_p', name: 'PE Uniforms (P1 - P5)' },
+            { id: 'cat_pe_s', name: 'PE Uniforms (S1 - S7)' },
+            { id: 'cat_lao', name: 'Lao Books' },
+            { id: 'cat_eng', name: 'English Books' },
+            { id: 'cat_note', name: 'Notebooks' }
+        ];
+
+        let state = {
+            products: [],
+            categories: [],
+            settings: {},
+            cart: [],
+            currentView: 'home', 
+            activeMainGroup: null,
+            activeCategory: 'all_in_group',
+            isAdmin: false
+        };
+
+        const formatLAKManual = (num) => Number(num).toLocaleString('en-US') + ' LAK';
+
+        // ==========================================
+        // 3. DATABASE & STORAGE LAYER
+        // ==========================================
+        async function dbGetAll(colName) {
+            const snapshot = await getDocs(getColRef(colName));
+            return snapshot.docs.map(doc => doc.data());
+        }
+
+        async function dbPut(colName, data) {
+            await setDoc(doc(getColRef(colName), data.id), data);
+        }
+
+        async function dbDelete(colName, id) {
+            await deleteDoc(doc(getColRef(colName), id));
+        }
+
+        async function dbClear(colName) {
+            const snapshot = await getDocs(getColRef(colName));
+            const batch = writeBatch(db);
+            snapshot.docs.forEach(d => {
+                batch.delete(d.ref);
+            });
+            await batch.commit();
+        }
+
+        async function uploadImageIfNeeded(base64Str, pathPrefix) {
+            // If it's empty or already a standard web URL, skip upload
+            if (!base64Str || !base64Str.startsWith('data:image')) {
+                return base64Str;
+            }
+            // Otherwise, upload base64 to Firebase Storage
+            const storageRef = ref(storage, `${pathPrefix}/${Date.now()}_${Math.floor(Math.random()*10000)}`);
+            await uploadString(storageRef, base64Str, 'data_url');
+            return await getDownloadURL(storageRef);
+        }
+
+        async function seedDefaults() {
+            const settingsArr = await dbGetAll('settings');
+            if (settingsArr.length === 0) {
+                await dbPut('settings', {
+                    id: 'app_settings',
+                    adminPin: '0000',
+                    whatsappNumber: '85620XXXXXXXX',
+                    bcelQrImage: '',
+                    logoImage: ''
+                });
+            }
+            const cats = await dbGetAll('categories');
+            if (cats.length === 0) {
+                for (const cat of defaultCategories) {
+                    await dbPut('categories', cat);
+                }
+            }
+        }
+
+        // ==========================================
+        // 4. INITIALIZATION & UI UTILS
+        // ==========================================
+        async function initApp() {
+            try {
+                // Ensure authentication is completed before any DB query
+                try {
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(auth, __initial_auth_token);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                } catch(e) {
+                    // Fallback to anonymous sign in if custom token mismatches your specific Firebase project
+                    console.warn("Auth token mapping failed, falling back to Anonymous:", e);
+                    await signInAnonymously(auth);
+                }
+
+                await seedDefaults();
+                
+                state.products = await dbGetAll('products');
+                state.categories = await dbGetAll('categories');
+                const settingsArr = await dbGetAll('settings');
+                state.settings = settingsArr[0] || {};
+                
+                updateFavicon(state.settings.logoImage);
+                renderApp();
+            } catch(e) {
+                console.error("Firebase Error: ", e);
+                document.getElementById('app').innerHTML = `<div class="p-10 text-center text-red-500 font-bold">Failed to load database. Ensure Firestore is enabled in your Firebase console. Check console logs.</div>`;
+            }
+        }
+
+        function updateFavicon(base64Image) {
+            if (!base64Image) return;
+            let icon = document.querySelector("link[rel~='icon']");
+            if (!icon) {
+                icon = document.createElement('link');
+                icon.rel = 'icon';
+                document.head.appendChild(icon);
+            }
+            icon.href = base64Image;
+
+            let appleIcon = document.querySelector("link[rel='apple-touch-icon']");
+            if (!appleIcon) {
+                appleIcon = document.createElement('link');
+                appleIcon.rel = 'apple-touch-icon';
+                document.head.appendChild(appleIcon);
+            }
+            appleIcon.href = base64Image;
+        }
+
+        function navigate(view) {
+            state.currentView = view;
+            if (view === 'products') {
+                const groups = Object.keys(getCategoryGroups());
+                if (!state.activeMainGroup && groups.length > 0) {
+                    state.activeMainGroup = groups[0];
+                }
+            }
+            renderApp();
+        }
+
+        function showToast(msg) {
+            const toast = document.createElement('div');
+            toast.className = 'fixed bottom-24 left-1/2 transform -translate-x-1/2 bg-gray-900 text-mcYellow font-bold px-6 py-3 rounded-full shadow-2xl z-50 animate-bounce border-2 border-mcYellow whitespace-nowrap';
+            toast.innerText = msg;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 2500);
+        }
+
+        function openModal(contentHtml) {
+            document.getElementById('modal-container').innerHTML = `
+                <div class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4 backdrop-blur-sm page-transition">
+                    <div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col border-4 border-mcRed overflow-hidden relative">
+                        ${contentHtml}
+                    </div>
+                </div>
+            `;
+            lucide.createIcons();
+        }
+
+        function closeModal() {
+            document.getElementById('modal-container').innerHTML = '';
+        }
+
+        // Parse categories into groups based on naming convention "Main (Sub)"
+        function getCategoryGroups() {
+            const groups = {};
+            state.categories.forEach(c => {
+                let match = c.name.match(/^(.*?)(?:\s*\((.*?)\))?$/);
+                let main = match && match[1] ? match[1].trim() : c.name;
+                let sub = match && match[2] ? match[2].trim() : 'General';
+                if (!groups[main]) groups[main] = [];
+                groups[main].push({ id: c.id, subName: sub, originalName: c.name });
+            });
+            return groups;
+        }
+
+        // ==========================================
+        // 5. MAIN APP ROUTER & SHELL
+        // ==========================================
+        function renderApp() {
+            const app = document.getElementById('app');
+            
+            if (state.currentView === 'admin' && state.isAdmin) {
+                renderAdminPanel(app);
+                return;
+            }
+
+            const logoHtml = state.settings.logoImage 
+                ? `<img src="${state.settings.logoImage}" class="h-10 w-10 sm:h-12 sm:w-12 bg-white rounded-full p-1 shadow-sm object-contain">` 
+                : `<div class="bg-mcYellow rounded-full p-2 shadow-sm group-hover:scale-110 transition-transform"><i data-lucide="store" class="text-mcRed w-6 h-6 sm:w-7 sm:h-7"></i></div>`;
+
+            let mainContent = '';
+            if (state.currentView === 'home') mainContent = getHomeHTML();
+            else if (state.currentView === 'products') mainContent = getProductsHTML();
+
+            app.innerHTML = `
+                <!-- Top Navigation Shell -->
+                <header class="bg-mcRed sticky top-0 z-40 shadow-md border-b-4 border-mcYellow">
+                    <div class="w-full px-4 sm:px-6 lg:px-8 py-3 flex justify-between items-center h-[72px]">
+                        <!-- Left: Brand -->
+                        <div class="flex items-center gap-2 sm:gap-3 cursor-pointer group" onclick="navigate('home')">
+                            ${logoHtml}
+                            <h1 class="text-mcYellow text-2xl sm:text-3xl font-black tracking-widest drop-shadow-md" style="font-family: 'Arial Black', sans-serif;">NEERADA</h1>
+                        </div>
+
+                        <!-- Center: Desktop Links -->
+                        <div class="hidden md:flex items-center gap-8 font-black text-lg text-white">
+                            <button onclick="navigate('home')" class="${state.currentView==='home'?'text-mcYellow border-b-4 border-mcYellow py-1':'hover:text-mcYellow py-1 border-b-4 border-transparent'} transition-all">HOME</button>
+                            <button onclick="navigate('products')" class="${state.currentView==='products'?'text-mcYellow border-b-4 border-mcYellow py-1':'hover:text-mcYellow py-1 border-b-4 border-transparent'} transition-all">PRODUCTS</button>
+                        </div>
+
+                        <!-- Right: Actions -->
+                        <div class="flex items-center gap-3 sm:gap-5">
+                            <button onclick="promptAdmin()" class="bg-white text-mcRed px-4 py-2 rounded-full font-black text-sm sm:text-base shadow-sm hover:bg-gray-100 hover:scale-105 transition-all flex items-center gap-2 border-b-4 border-gray-200 active:border-b-0 active:translate-y-1 hidden sm:flex">
+                                <i data-lucide="user" class="w-5 h-5"></i> Login
+                            </button>
+                            <button onclick="openCart()" class="relative bg-mcYellow text-black p-3 rounded-full hover:bg-yellow-400 shadow-[0_4px_0_rgba(200,150,0,1)] hover:translate-y-[2px] hover:shadow-[0_2px_0_rgba(200,150,0,1)] active:shadow-none active:translate-y-[4px] transition-all">
+                                <i data-lucide="shopping-cart" class="w-6 h-6"></i>
+                                <span id="cart-badge" class="absolute -top-2 -right-2 bg-black text-mcYellow text-xs font-black w-6 h-6 rounded-full flex items-center justify-center hidden border-2 border-mcYellow shadow-lg">0</span>
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Mobile Links Row -->
+                    <div class="md:hidden flex bg-red-800 text-white font-black text-sm shadow-inner justify-around border-t border-red-900">
+                        <button onclick="navigate('home')" class="py-3 flex-1 text-center ${state.currentView==='home'?'bg-mcYellow text-black':''}">HOME</button>
+                        <button onclick="navigate('products')" class="py-3 flex-1 text-center border-l border-red-700 ${state.currentView==='products'?'bg-mcYellow text-black':''}">PRODUCTS</button>
+                        <button onclick="promptAdmin()" class="py-3 flex-1 text-center border-l border-red-700">LOGIN</button>
+                    </div>
+                </header>
+
+                <!-- Dynamic Content -->
+                <main class="w-full flex-1 flex flex-col page-transition bg-yellow-50">
+                    ${mainContent}
+                </main>
+
+                <!-- Compact Footer -->
+                <footer class="bg-mcRed text-white text-center py-5 border-t-4 border-mcYellow mt-auto">
+                    <h3 class="font-extrabold text-xl text-mcYellow tracking-wider drop-shadow-sm mb-1">NEERADA STORE</h3>
+                    <p class="font-bold text-xs opacity-80">&copy; 2026 Neerada Store. All rights reserved.</p>
+                </footer>
+            `;
+            lucide.createIcons();
+            renderCartBadge();
+        }
+
+        // ==========================================
+        // 5a. HOME VIEW
+        // ==========================================
+        function getHomeHTML() {
+            // Get 4 random featured products
+            const featured = [...state.products].sort(() => 0.5 - Math.random()).slice(0, 4);
+            
+            let featuredHtml = '';
+            if (featured.length > 0) {
+                featuredHtml = `
+                    <div class="w-full px-4 sm:px-6 lg:px-8 py-10">
+                        <h3 class="text-3xl font-black text-gray-900 mb-6 border-l-8 border-mcRed pl-4">Featured Items</h3>
+                        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+                            ${featured.map(p => generateProductCard(p)).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            return `
+                <div class="w-full px-4 sm:px-6 lg:px-8 py-6">
+                    <!-- Hero Section -->
+                    <div class="bg-mcRed rounded-[2rem] overflow-hidden shadow-2xl relative flex flex-col md:flex-row items-center justify-between border-b-[8px] sm:border-b-[12px] border-mcYellow mb-8">
+                        <div class="p-8 sm:p-12 md:p-16 z-10 text-center md:text-left flex-1">
+                            <h2 class="text-mcYellow text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-black mb-2 tracking-tighter leading-none" style="font-family: 'Arial Black', sans-serif;">LOVIN' IT.</h2>
+                            <h3 class="text-white text-3xl sm:text-4xl lg:text-5xl font-black mb-6 tracking-wide drop-shadow-md">LEARN & GROW</h3>
+                            <p class="text-white text-lg sm:text-xl font-bold mb-8 opacity-95 max-w-xl mx-auto md:mx-0">Get ready for the school year with fresh uniforms and books. Fast order, happy students!</p>
+                            <button onclick="navigate('products')" class="bg-mcYellow text-black font-black text-xl sm:text-2xl px-10 py-5 sm:px-12 rounded-full shadow-[0_8px_0_rgba(200,150,0,1)] hover:shadow-[0_4px_0_rgba(200,150,0,1)] hover:translate-y-[4px] active:shadow-none active:translate-y-[8px] transition-all inline-flex items-center gap-3">
+                                <i data-lucide="shopping-bag" class="w-7 h-7"></i> SHOP NOW
+                            </button>
+                        </div>
+                        <div class="hidden md:flex flex-1 p-8 relative min-h-[450px] items-center justify-center">
+                            <div class="absolute w-[150%] h-[150%] bg-mcYellow rounded-full -right-[50%] opacity-20 animate-pulse"></div>
+                            <div class="absolute w-[100%] h-[100%] bg-white rounded-full -bottom-[50%] right-[10%] opacity-10"></div>
+                            <i data-lucide="backpack" class="w-64 h-64 lg:w-80 lg:h-80 text-mcYellow opacity-95 drop-shadow-2xl transform rotate-12 z-10"></i>
+                            <i data-lucide="book-open" class="w-32 h-32 text-white opacity-40 absolute top-10 left-10 transform -rotate-12 z-10"></i>
+                            <i data-lucide="pencil" class="w-24 h-24 text-mcYellow opacity-60 absolute bottom-10 right-20 transform -rotate-45 z-10"></i>
+                        </div>
+                    </div>
+
+                    <!-- Promo Banner -->
+                    <div class="bg-white rounded-3xl p-6 sm:p-8 shadow-md border-2 border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-6 hover:shadow-xl transition-shadow cursor-pointer" onclick="navigate('products')">
+                        <div class="flex items-center gap-4">
+                            <div class="bg-yellow-100 p-4 rounded-full text-yellow-600"><i data-lucide="zap" class="w-8 h-8 fill-current"></i></div>
+                            <div>
+                                <h4 class="text-2xl font-black text-gray-900">New Arrivals!</h4>
+                                <p class="text-gray-600 font-bold text-sm">Check out the latest notebooks and English books for the new semester.</p>
+                            </div>
+                        </div>
+                        <button class="whitespace-nowrap bg-gray-900 text-white px-6 py-3 rounded-full font-black hover:bg-black transition-colors">View All</button>
+                    </div>
+                </div>
+
+                ${featuredHtml}
+            `;
+        }
+
+        // ==========================================
+        // 5b. PRODUCTS VIEW
+        // ==========================================
+        function getProductsHTML() {
+            const groups = getCategoryGroups();
+            const groupNames = Object.keys(groups);
+
+            let mainPillsHtml = groupNames.map(g => {
+                const isActive = state.activeMainGroup === g;
+                return `<button onclick="setMainGroup('${g}')" class="whitespace-nowrap px-6 py-3 rounded-full font-black text-sm sm:text-base border-2 transition-all ${isActive ? 'bg-mcRed text-white border-mcRed shadow-md scale-105' : 'bg-white text-gray-800 border-gray-200 hover:border-mcRed hover:text-mcRed shadow-sm'}">${g}</button>`;
+            }).join('');
+
+            let subPillsHtml = '';
+            if (state.activeMainGroup && groups[state.activeMainGroup]) {
+                const isAllActive = state.activeCategory === 'all_in_group';
+                subPillsHtml += `<button onclick="setSubCategory('all_in_group')" class="whitespace-nowrap px-4 py-2 rounded-full font-bold text-sm border-2 transition-all ${isAllActive ? 'bg-mcYellow text-black border-mcYellow shadow-sm' : 'bg-white text-gray-600 border-gray-200 hover:border-mcYellow hover:bg-yellow-50'}">All ${state.activeMainGroup}</button>`;
+                
+                groups[state.activeMainGroup].forEach(sub => {
+                    const isActive = state.activeCategory === sub.id;
+                    subPillsHtml += `<button onclick="setSubCategory('${sub.id}')" class="whitespace-nowrap px-4 py-2 rounded-full font-bold text-sm border-2 transition-all ${isActive ? 'bg-mcYellow text-black border-mcYellow shadow-sm' : 'bg-white text-gray-600 border-gray-200 hover:border-mcYellow hover:bg-yellow-50'}">${sub.subName}</button>`;
+                });
+            }
+
+            let filteredProducts = [];
+            if (state.activeMainGroup && groups[state.activeMainGroup]) {
+                if (state.activeCategory === 'all_in_group') {
+                    const groupCatIds = groups[state.activeMainGroup].map(g => g.id);
+                    filteredProducts = state.products.filter(p => groupCatIds.includes(p.categoryId));
+                } else {
+                    filteredProducts = state.products.filter(p => p.categoryId === state.activeCategory);
+                }
+            }
+
+            let productsGridHtml = filteredProducts.length > 0 
+                ? filteredProducts.map(p => generateProductCard(p)).join('')
+                : `<div class="col-span-full py-20 text-center text-gray-500 font-bold text-2xl flex flex-col items-center"><i data-lucide="package-open" class="w-24 h-24 mb-4 text-gray-300"></i>No products found in this selection.</div>`;
+
+            return `
+                <div class="bg-yellow-100 shadow-inner sticky top-[113px] sm:top-[72px] z-30 border-b-2 border-yellow-200">
+                    <div class="w-full px-4 sm:px-6 lg:px-8 py-3 sm:py-4 flex gap-3 sm:gap-4 overflow-x-auto no-scrollbar items-center">
+                        ${mainPillsHtml}
+                    </div>
+                </div>
+
+                ${subPillsHtml ? `
+                <div class="bg-white shadow-sm border-b border-gray-200">
+                    <div class="w-full px-4 sm:px-6 lg:px-8 py-3 flex gap-2 sm:gap-3 overflow-x-auto no-scrollbar items-center">
+                        ${subPillsHtml}
+                    </div>
+                </div>` : ''}
+
+                <div class="w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8 flex-1">
+                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 sm:gap-6">
+                        ${productsGridHtml}
+                    </div>
+                </div>
+            `;
+        }
+
+        function setMainGroup(gName) {
+            state.activeMainGroup = gName;
+            state.activeCategory = 'all_in_group';
+            renderApp();
+        }
+
+        function setSubCategory(catId) {
+            state.activeCategory = catId;
+            renderApp();
+        }
+
+        function generateProductCard(p) {
+            const sizeSelectStr = p.sizes && p.sizes.trim().length > 0 ? `
+                <div class="mb-3 mt-auto">
+                    <select id="size-${p.id}" class="w-full p-2 bg-gray-50 border-2 border-gray-200 rounded-xl font-bold text-sm focus:border-mcYellow focus:outline-none appearance-none">
+                        ${p.sizes.split(',').map(s => `<option value="${s.trim()}">${s.trim()}</option>`).join('')}
+                    </select>
+                </div>
+            ` : '<div class="mt-auto"></div>';
+
+            const imgHtml = p.image 
+                ? `<div class="w-full h-64 sm:h-80 bg-white flex items-center justify-center p-2 border-b-2 border-gray-100 overflow-hidden"><img src="${p.image}" class="w-full h-full object-contain drop-shadow-md"></div>`
+                : `<div class="w-full h-64 sm:h-80 bg-gray-50 flex items-center justify-center border-b-2 border-gray-100"><i data-lucide="image" class="w-24 h-24 sm:w-32 sm:h-32 text-gray-200"></i></div>`;
+
+            return `
+                <div class="bg-white rounded-[2rem] overflow-hidden shadow-lg border-2 border-transparent hover:border-mcRed hover:shadow-2xl transition-all duration-300 flex flex-col group page-transition">
+                    ${imgHtml}
+                    <div class="p-4 flex flex-col flex-1">
+                        <h3 class="font-extrabold text-sm sm:text-base leading-tight mb-2 text-gray-900 group-hover:text-mcRed transition-colors line-clamp-2">${p.name}</h3>
+                        <div class="text-mcRed font-bold text-lg mb-4 drop-shadow-sm">${formatLAKManual(p.price)}</div>
+                        
+                        ${sizeSelectStr}
+                        <div class="pt-2">
+                            <button onclick="addToCart('${p.id}')" class="w-full bg-mcYellow text-black font-extrabold text-sm sm:text-base py-3 rounded-2xl shadow-[0_4px_0_rgba(200,150,0,1)] hover:shadow-[0_2px_0_rgba(200,150,0,1)] hover:translate-y-[2px] active:shadow-none active:translate-y-[4px] transition-all flex justify-center items-center gap-2">
+                                <i data-lucide="plus" class="w-5 h-5 stroke-[3]"></i> ADD
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // ==========================================
+        // 6. CART & CHECKOUT
+        // ==========================================
+        function addToCart(productId) {
+            const product = state.products.find(p => p.id === productId);
+            let size = '';
+            if (product.sizes && product.sizes.trim() !== '') {
+                const sizeEl = document.getElementById(`size-${productId}`);
+                if(sizeEl) size = sizeEl.value;
+            }
+            
+            const cartKey = `${productId}-${size}`;
+            const existing = state.cart.find(item => item.cartKey === cartKey);
+            
+            if (existing) {
+                existing.quantity++;
+            } else {
+                state.cart.push({
+                    cartKey, productId, name: product.name, price: Number(product.price), size, quantity: 1, image: product.image
+                });
+            }
+            renderCartBadge();
+            showToast('Added to Cart! 🍟');
+        }
+
+        function renderCartBadge() {
+            const badge = document.getElementById('cart-badge');
+            if(!badge) return;
+            const totalQty = state.cart.reduce((sum, item) => sum + item.quantity, 0);
+            if(totalQty > 0) {
+                badge.innerText = totalQty;
+                badge.classList.remove('hidden');
+            } else {
+                badge.classList.add('hidden');
+            }
+        }
+
+        function changeQty(index, delta) {
+            state.cart[index].quantity += delta;
+            if(state.cart[index].quantity <= 0) {
+                state.cart.splice(index, 1);
+            }
+            renderCartBadge();
+            if(state.cart.length === 0) closeModal();
+            else openCart();
+        }
+
+        function openCart() {
+            if(state.cart.length === 0) {
+                showToast("Your cart is empty!");
+                return;
+            }
+            let itemsHtml = state.cart.map((item, index) => `
+                <div class="flex justify-between items-center bg-gray-50 p-4 rounded-2xl mb-3 border-2 border-gray-100">
+                    <div class="flex items-center gap-4">
+                        ${item.image ? `<img src="${item.image}" class="w-16 h-16 object-cover rounded-xl shadow-sm border border-gray-200">` : `<div class="w-16 h-16 bg-gray-200 rounded-xl flex items-center justify-center"><i data-lucide="image" class="text-gray-400"></i></div>`}
+                        <div>
+                            <h4 class="font-extrabold text-gray-900 leading-tight">${item.name}</h4>
+                            ${item.size ? `<p class="text-sm font-bold text-gray-500 mt-1 bg-white inline-block px-2 rounded-md border">Size: ${item.size}</p>` : ''}
+                            <p class="text-mcRed font-black mt-1">${formatLAKManual(item.price)}</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-3 bg-white border-2 border-gray-200 rounded-full px-2 py-1 shadow-sm">
+                        <button onclick="changeQty(${index}, -1)" class="w-8 h-8 text-mcRed font-bold text-xl flex items-center justify-center active:scale-90">-</button>
+                        <span class="font-black w-4 text-center">${item.quantity}</span>
+                        <button onclick="changeQty(${index}, 1)" class="w-8 h-8 text-mcRed font-bold text-xl flex items-center justify-center active:scale-90">+</button>
+                    </div>
+                </div>
+            `).join('');
+
+            const total = state.cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+
+            openModal(`
+                <div class="p-6 border-b-2 border-gray-100 flex justify-between items-center bg-mcYellow text-black shrink-0">
+                    <h2 class="text-2xl font-black flex items-center gap-2"><i data-lucide="shopping-cart"></i> Your Cart</h2>
+                    <button onclick="closeModal()" class="bg-black text-mcYellow p-2 rounded-full hover:bg-gray-800 transition"><i data-lucide="x"></i></button>
+                </div>
+                <div class="p-6 overflow-y-auto flex-1 bg-white">
+                    ${itemsHtml}
+                </div>
+                <div class="p-6 bg-gray-50 border-t-2 border-gray-200 shrink-0">
+                    <div class="flex justify-between font-black text-2xl mb-4">
+                        <span>Total:</span>
+                        <span class="text-mcRed">${formatLAKManual(total)}</span>
+                    </div>
+                    <button onclick="renderCheckoutModal()" class="w-full bg-mcRed text-white font-black text-xl py-4 rounded-full shadow-lg hover:bg-red-700 active:scale-95 transition-transform">
+                        Proceed to Checkout
+                    </button>
+                </div>
+            `);
+        }
+
+        function renderCheckoutModal() {
+            const total = state.cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+            const hasQr = state.settings.bcelQrImage && state.settings.bcelQrImage.length > 10;
+            
+            openModal(`
+                <div class="p-6 border-b-2 border-gray-100 flex justify-between items-center bg-mcYellow text-black shrink-0">
+                    <button onclick="openCart()" class="p-2 -ml-2 hover:bg-yellow-500 rounded-full transition"><i data-lucide="arrow-left"></i></button>
+                    <h2 class="text-2xl font-black flex items-center gap-2">Checkout</h2>
+                    <button onclick="closeModal()" class="p-2 -mr-2 hover:bg-yellow-500 rounded-full transition"><i data-lucide="x"></i></button>
+                </div>
+                <div class="p-6 overflow-y-auto space-y-5 flex-1 bg-white">
+                    <div>
+                        <label class="block font-extrabold text-gray-700 mb-2">Student / Parent Name</label>
+                        <input type="text" id="co-name" class="w-full p-4 border-2 border-gray-300 bg-gray-50 rounded-2xl font-bold focus:border-mcRed focus:outline-none focus:bg-white transition" placeholder="Enter your name">
+                    </div>
+                    <div>
+                        <label class="block font-extrabold text-gray-700 mb-2">Payment Method</label>
+                        <select id="co-payment" class="w-full p-4 border-2 border-gray-300 bg-gray-50 rounded-2xl font-bold focus:border-mcRed focus:outline-none focus:bg-white transition appearance-none" onchange="toggleQR()">
+                            <option value="COD">💵 Cash on Delivery (COD)</option>
+                            <option value="BCEL">📲 BCEL OnePay QR</option>
+                        </select>
+                    </div>
+                    <div id="qr-container" class="hidden text-center bg-gray-50 p-6 rounded-3xl border-2 border-dashed border-gray-300">
+                        ${hasQr ? `<img src="${state.settings.bcelQrImage}" class="mx-auto max-h-64 rounded-xl shadow-lg border border-gray-200 mb-4">
+                                   <p class="text-lg text-gray-800 font-black bg-mcYellow inline-block px-4 py-2 rounded-full">Total: ${formatLAKManual(total)}</p>
+                                   <p class="text-sm text-gray-500 mt-3 font-bold">Please scan and save the receipt!</p>` 
+                                : `<div class="text-red-500 font-bold p-4 bg-red-50 rounded-xl"><i data-lucide="alert-circle" class="mx-auto mb-2 w-8 h-8"></i>QR Code not set by Admin. Please use COD.</div>`}
+                    </div>
+                </div>
+                <div class="p-6 bg-gray-50 border-t-2 border-gray-200 shrink-0">
+                    <button onclick="submitOrder()" class="w-full bg-[#25D366] text-white font-black text-xl py-4 rounded-full shadow-lg hover:bg-green-600 active:scale-95 transition-transform flex justify-center items-center gap-2">
+                        <i data-lucide="message-circle" class="w-6 h-6 text-white fill-current"></i> Order via WhatsApp
+                    </button>
+                </div>
+            `);
+        }
+
+        function toggleQR() {
+            const val = document.getElementById('co-payment').value;
+            document.getElementById('qr-container').classList.toggle('hidden', val !== 'BCEL');
+        }
+
+        function submitOrder() {
+            const name = document.getElementById('co-name').value.trim();
+            if(!name) { alert("Please enter your name."); return; }
+            
+            const payment = document.getElementById('co-payment').value;
+            
+            let msg = `🍟 *New Order: Neerada Store* 🍟\n\n*Name:* ${name}\n\n*Items:*\n`;
+            let total = 0;
+            state.cart.forEach(item => {
+                msg += `▪ ${item.quantity}x ${item.name} ${item.size ? `(Size: ${item.size})` : ''} - ${formatLAKManual(item.price * item.quantity)}\n`;
+                total += item.price * item.quantity;
+            });
+            msg += `\n*Total:* ${formatLAKManual(total)}\n`;
+            msg += `*Payment:* ${payment === 'BCEL' ? 'BCEL OnePay QR' : 'Cash on Delivery'}\n\n`;
+            msg += `_Please prepare the order for pickup!_`;
+            
+            const encodedMsg = encodeURIComponent(msg);
+            const waNumber = (state.settings.whatsappNumber || '8562000000000').replace(/[^0-9]/g, '');
+            const url = `https://wa.me/${waNumber}?text=${encodedMsg}`;
+            
+            window.open(url, '_blank');
+            
+            state.cart = [];
+            renderCartBadge();
+            
+            openModal(`
+                <div class="p-10 text-center">
+                    <div class="w-24 h-24 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner">
+                        <i data-lucide="check" class="w-12 h-12 text-green-600"></i>
+                    </div>
+                    <h2 class="text-3xl font-black text-gray-900 mb-3">Order Sent!</h2>
+                    <p class="text-gray-600 font-bold mb-8 text-lg">Your order details were sent to our WhatsApp. We will confirm shortly.</p>
+                    <button onclick="closeModal()" class="w-full bg-mcYellow text-black font-extrabold text-xl py-4 rounded-full hover:bg-yellow-400 shadow-md">Continue Shopping</button>
+                </div>
+            `);
+        }
+
+        // ==========================================
+        // 7. ADMIN PANEL
+        // ==========================================
+        function promptAdmin() {
+            openModal(`
+                <div class="p-8 text-center bg-gray-900 text-white rounded-3xl">
+                    <div class="w-20 h-20 bg-gray-800 border-4 border-mcRed rounded-full flex items-center justify-center mx-auto mb-6 shadow-lg">
+                        <i data-lucide="shield" class="w-10 h-10 text-mcRed"></i>
+                    </div>
+                    <h2 class="text-2xl font-black mb-6 tracking-widest text-mcYellow">SYSTEM LOCK</h2>
+                    <input type="password" id="admin_pin_input" class="w-full text-center text-3xl tracking-[1em] p-4 bg-gray-800 border-2 border-gray-700 rounded-2xl mb-6 focus:border-mcRed focus:outline-none font-mono text-white" placeholder="****" autocomplete="off">
+                    <button onclick="checkAdminPin()" class="w-full bg-mcRed text-white font-black text-xl py-4 rounded-full shadow-lg hover:bg-red-700 active:scale-95 transition-transform">UNLOCK</button>
+                </div>
+            `);
+            setTimeout(() => document.getElementById('admin_pin_input').focus(), 100);
+        }
+
+        function checkAdminPin() {
+            const pin = document.getElementById('admin_pin_input').value;
+            if(pin === state.settings.adminPin) {
+                state.isAdmin = true;
+                closeModal();
+                navigate('admin');
+            } else {
+                alert("ACCESS DENIED");
+            }
+        }
+
+        function exitAdmin() {
+            state.isAdmin = false;
+            navigate('home');
+        }
+
+        function renderAdminPanel(container) {
+            container.innerHTML = `
+                <div class="min-h-screen bg-gray-100 flex flex-col page-transition w-full">
+                    <!-- Admin Header -->
+                    <div class="bg-gray-900 text-white p-4 shadow-lg sticky top-0 z-40 flex justify-between items-center border-b-4 border-mcRed">
+                        <div class="flex items-center gap-3">
+                            <i data-lucide="settings" class="text-mcYellow"></i>
+                            <h1 class="text-xl font-black tracking-wider">STORE ADMIN</h1>
+                        </div>
+                        <button onclick="exitAdmin()" class="bg-red-600 px-4 py-2 rounded-full font-bold hover:bg-red-700 flex items-center gap-2 text-sm shadow-md transition">
+                            <i data-lucide="log-out" class="w-4 h-4"></i> Exit
+                        </button>
+                    </div>
+                    
+                    <!-- Admin Content -->
+                    <div class="p-4 w-full px-4 sm:px-6 lg:px-8 mx-auto mt-4 flex-1">
+                        <div class="flex gap-2 mb-6 overflow-x-auto no-scrollbar pb-2 bg-white p-2 rounded-2xl shadow-sm border border-gray-200">
+                            <button onclick="adminTab('products')" id="tab-products" class="admin-tab flex-1 bg-gray-900 text-white font-bold py-3 px-6 rounded-xl text-center whitespace-nowrap transition">Products</button>
+                            <button onclick="adminTab('categories')" id="tab-categories" class="admin-tab flex-1 text-gray-600 hover:bg-gray-100 font-bold py-3 px-6 rounded-xl text-center whitespace-nowrap transition">Categories</button>
+                            <button onclick="adminTab('settings')" id="tab-settings" class="admin-tab flex-1 text-gray-600 hover:bg-gray-100 font-bold py-3 px-6 rounded-xl text-center whitespace-nowrap transition">Settings</button>
+                        </div>
+                        
+                        <div id="admin-content" class="bg-white p-6 md:p-8 rounded-3xl shadow-xl border-t-8 border-mcRed">
+                            <!-- Dynamic Content -->
+                        </div>
+                    </div>
+                </div>
+            `;
+            lucide.createIcons();
+            adminTab('products');
+        }
+
+        function adminTab(tabName) {
+            document.querySelectorAll('.admin-tab').forEach(el => {
+                el.classList.remove('bg-gray-900', 'text-white');
+                el.classList.add('text-gray-600', 'hover:bg-gray-100');
+            });
+            const activeEl = document.getElementById(`tab-${tabName}`);
+            activeEl.classList.remove('text-gray-600', 'hover:bg-gray-100');
+            activeEl.classList.add('bg-gray-900', 'text-white');
+
+            const content = document.getElementById('admin-content');
+            if (tabName === 'products') renderAdminProducts(content);
+            else if (tabName === 'categories') renderAdminCategories(content);
+            else if (tabName === 'settings') renderAdminSettings(content);
+        }
+
+        // ==========================================
+        // 7a. ADMIN: PRODUCTS
+        // ==========================================
+        function renderAdminProducts(container) {
+            let html = `
+                <div class="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
+                    <h2 class="text-3xl font-black text-gray-800">Products Catalog</h2>
+                    <button onclick="openProductModal()" class="w-full md:w-auto bg-mcYellow text-black px-6 py-3 rounded-full font-black flex justify-center items-center gap-2 hover:bg-yellow-400 shadow-md">
+                        <i data-lucide="plus" class="w-5 h-5"></i> Add Product
+                    </button>
+                </div>
+                <div class="overflow-x-auto rounded-xl border border-gray-200">
+                    <table class="w-full text-left border-collapse min-w-[600px]">
+                        <thead>
+                            <tr class="bg-gray-100 text-gray-600 text-sm uppercase tracking-wider">
+                                <th class="p-4 font-bold rounded-tl-xl">Photo</th>
+                                <th class="p-4 font-bold">Details</th>
+                                <th class="p-4 font-bold">Price</th>
+                                <th class="p-4 font-bold text-right rounded-tr-xl">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-200">
+            `;
+            
+            if(state.products.length === 0) {
+                html += `<tr><td colspan="4" class="p-8 text-center text-gray-400 font-bold">No products. Click "Add Product" to start.</td></tr>`;
+            } else {
+                state.products.forEach(p => {
+                    const cat = state.categories.find(c => c.id === p.categoryId) || {name: 'Unknown'};
+                    html += `
+                        <tr class="hover:bg-gray-50 transition">
+                            <td class="p-4 w-24">
+                                ${p.image ? `<img src="${p.image}" class="w-16 h-16 object-cover rounded-lg shadow-sm border border-gray-200">` : `<div class="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center"><i data-lucide="image" class="w-6 h-6 text-gray-400"></i></div>`}
+                            </td>
+                            <td class="p-4">
+                                <p class="font-black text-gray-900 text-lg">${p.name}</p>
+                                <p class="text-sm text-gray-500 font-bold">${cat.name}</p>
+                                ${p.sizes ? `<p class="text-xs text-blue-600 font-bold mt-1 bg-blue-50 inline-block px-2 rounded border border-blue-100">Sizes: ${p.sizes}</p>` : ''}
+                            </td>
+                            <td class="p-4 text-mcRed font-black text-xl">${formatLAKManual(p.price)}</td>
+                            <td class="p-4 text-right whitespace-nowrap">
+                                <button onclick="openProductModal('${p.id}')" class="bg-blue-100 text-blue-600 p-2 rounded-lg hover:bg-blue-200 mr-2 transition"><i data-lucide="edit-2" class="w-5 h-5"></i></button>
+                                <button onclick="deleteProduct('${p.id}')" class="bg-red-100 text-red-600 p-2 rounded-lg hover:bg-red-200 transition"><i data-lucide="trash-2" class="w-5 h-5"></i></button>
+                            </td>
+                        </tr>
+                    `;
+                });
+            }
+
+            html += `</tbody></table></div>`;
+            container.innerHTML = html;
+            lucide.createIcons();
+        }
+
+        function openProductModal(id = null) {
+            let p = id ? state.products.find(x => x.id === id) : { id: '', name: '', categoryId: '', price: '', sizes: '', image: '' };
+            let catOptions = state.categories.map(c => `<option value="${c.id}" ${p.categoryId === c.id ? 'selected' : ''}>${c.name}</option>`).join('');
+
+            openModal(`
+                <div class="p-6 border-b-2 border-gray-100 flex justify-between items-center bg-gray-900 text-white shrink-0">
+                    <h2 class="text-2xl font-black">${id ? 'Edit Product' : 'Create Product'}</h2>
+                    <button onclick="closeModal()" class="hover:text-mcRed transition"><i data-lucide="x"></i></button>
+                </div>
+                <form id="productForm" class="flex flex-col flex-1 overflow-hidden" onsubmit="saveProduct(event, '${id || ''}')">
+                    <div class="p-6 overflow-y-auto space-y-5 bg-white flex-1">
+                        <div>
+                            <label class="block font-extrabold text-gray-700 mb-2">Product Name <span class="text-red-500">*</span></label>
+                            <input type="text" id="p_name" value="${p.name}" required class="w-full p-3 border-2 border-gray-300 rounded-xl focus:border-gray-900 focus:outline-none font-bold" placeholder="e.g. Boys PE Uniform">
+                        </div>
+                        <div>
+                            <label class="block font-extrabold text-gray-700 mb-2">Category <span class="text-red-500">*</span></label>
+                            <select id="p_cat" required class="w-full p-3 border-2 border-gray-300 rounded-xl focus:border-gray-900 focus:outline-none font-bold bg-white">
+                                <option value="">Select Category...</option>
+                                ${catOptions}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block font-extrabold text-gray-700 mb-2">Price (in LAK) <span class="text-red-500">*</span></label>
+                            <input type="number" id="p_price" value="${p.price}" required class="w-full p-3 border-2 border-gray-300 rounded-xl focus:border-gray-900 focus:outline-none font-bold" placeholder="50000">
+                        </div>
+                        <div>
+                            <label class="block font-extrabold text-gray-700 mb-2">Sizes (Comma separated)</label>
+                            <input type="text" id="p_sizes" value="${p.sizes || ''}" class="w-full p-3 border-2 border-gray-300 rounded-xl focus:border-gray-900 focus:outline-none font-bold" placeholder="e.g. S, M, L, XL">
+                            <p class="text-xs text-gray-500 mt-2 font-bold">Leave empty if books or not applicable.</p>
+                        </div>
+                        <div>
+                            <label class="block font-extrabold text-gray-700 mb-2">Product Photo</label>
+                            <div class="flex items-center gap-4">
+                                <label class="cursor-pointer bg-gray-100 border-2 border-dashed border-gray-300 hover:bg-gray-200 transition p-4 rounded-xl flex flex-col items-center justify-center w-full">
+                                    <i data-lucide="upload-cloud" class="w-8 h-8 text-gray-500 mb-2"></i>
+                                    <span class="text-sm font-bold text-gray-600">Select Image File</span>
+                                    <input type="file" id="p_image" accept="image/*" class="hidden" onchange="handleImageUpload(this, 'p_img_preview')">
+                                </label>
+                            </div>
+                            <img id="p_img_preview" src="${p.image || ''}" class="mt-4 w-full max-h-48 object-contain rounded-xl border border-gray-200 bg-gray-50 shadow-inner ${p.image ? '' : 'hidden'}">
+                            <input type="hidden" id="p_image_base64" value="${p.image || ''}">
+                        </div>
+                    </div>
+                    <div class="p-6 bg-gray-50 border-t-2 border-gray-200 shrink-0 flex gap-3">
+                        <button type="button" onclick="closeModal()" class="flex-1 bg-white border-2 border-gray-300 text-gray-700 py-3 rounded-full font-black hover:bg-gray-100 transition">Cancel</button>
+                        <button type="submit" class="flex-1 bg-gray-900 text-white py-3 rounded-full font-black hover:bg-black shadow-lg transition" id="save_product_btn">Save Product</button>
+                    </div>
+                </form>
+            `);
+        }
+
+        // Stores raw local Base64 purely for preview in modal
+        function handleImageUpload(input, previewId) {
+            if (input.files && input.files[0]) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const base64 = e.target.result;
+                    const preview = document.getElementById(previewId);
+                    if(preview) {
+                        preview.src = base64;
+                        preview.classList.remove('hidden');
+                    }
+                    const hiddenInput = document.getElementById(previewId.replace('_preview', '_base64'));
+                    if(hiddenInput) hiddenInput.value = base64;
+                };
+                reader.readAsDataURL(input.files[0]);
+            }
+        }
+
+        async function saveProduct(e, id) {
+            e.preventDefault();
+            
+            const btn = document.getElementById('save_product_btn');
+            const originalText = btn.innerText;
+            btn.innerText = 'Uploading...';
+            btn.disabled = true;
+
+            const newId = id || 'prod_' + Date.now();
+            let rawImage = document.getElementById('p_image_base64').value;
+            
+            try {
+                // Intercept Base64 and upload to Firebase Storage to get a tiny remote URL
+                showToast("Uploading data... ⏳");
+                const finalImageUrl = await uploadImageIfNeeded(rawImage, 'products');
+
+                const product = {
+                    id: newId,
+                    name: document.getElementById('p_name').value.trim(),
+                    categoryId: document.getElementById('p_cat').value,
+                    price: Number(document.getElementById('p_price').value),
+                    sizes: document.getElementById('p_sizes').value.trim(),
+                    image: finalImageUrl
+                };
+            
+                await dbPut('products', product);
+                const index = state.products.findIndex(p => p.id === newId);
+                if(index > -1) state.products[index] = product;
+                else state.products.push(product);
+                
+                closeModal();
+                showToast('Product Saved successfully!');
+                adminTab('products');
+            } catch (err) {
+                alert("Failed to save to Firebase! Error: " + err.message);
+                btn.innerText = originalText;
+                btn.disabled = false;
+            }
+        }
+
+        async function deleteProduct(id) {
+            if(confirm("Are you sure you want to delete this product?")) {
+                await dbDelete('products', id);
+                state.products = state.products.filter(p => p.id !== id);
+                showToast('Product deleted!');
+                adminTab('products');
+            }
+        }
+
+        // ==========================================
+        // 7b. ADMIN: CATEGORIES
+        // ==========================================
+        function renderAdminCategories(container) {
+            let html = `
+                <div class="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
+                    <h2 class="text-3xl font-black text-gray-800">Categories</h2>
+                    <button onclick="promptCategoryModal()" class="w-full md:w-auto bg-mcYellow text-black px-6 py-3 rounded-full font-black flex justify-center items-center gap-2 hover:bg-yellow-400 shadow-md">
+                        <i data-lucide="folder-plus" class="w-5 h-5"></i> Add Category
+                    </button>
+                </div>
+                <div class="bg-blue-50 text-blue-800 p-4 rounded-xl mb-6 font-bold text-sm">
+                    <i data-lucide="info" class="inline w-5 h-5 mr-1"></i>
+                    <strong>Pro Tip:</strong> Group your categories by using parenthesis! Example: naming a category <strong>"School Uniforms (Pre-K)"</strong> automatically creates a main "School Uniforms" tab with a "Pre-K" sub-tab.
+                </div>
+                <div class="overflow-hidden rounded-xl border border-gray-200">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-gray-100 text-gray-600 text-sm uppercase tracking-wider">
+                                <th class="p-4 font-bold rounded-tl-xl w-3/4">Category Name</th>
+                                <th class="p-4 font-bold text-right rounded-tr-xl w-1/4">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-200">
+            `;
+            state.categories.forEach(c => {
+                html += `
+                    <tr class="hover:bg-gray-50 transition">
+                        <td class="p-4 font-black text-gray-900 text-lg">${c.name}</td>
+                        <td class="p-4 text-right whitespace-nowrap">
+                            <button onclick="promptCategoryModal('${c.id}')" class="bg-blue-100 text-blue-600 p-2 rounded-lg hover:bg-blue-200 mr-2 transition"><i data-lucide="edit-2" class="w-5 h-5"></i></button>
+                            <button onclick="deleteCategory('${c.id}')" class="bg-red-100 text-red-600 p-2 rounded-lg hover:bg-red-200 transition"><i data-lucide="trash-2" class="w-5 h-5"></i></button>
+                        </td>
+                    </tr>
+                `;
+            });
+            html += `</tbody></table></div>`;
+            container.innerHTML = html;
+            lucide.createIcons();
+        }
+
+        function promptCategoryModal(id = null) {
+            let cat = id ? state.categories.find(c => c.id === id) : {id: '', name: ''};
+            openModal(`
+                <div class="p-6 border-b-2 border-gray-100 flex justify-between items-center bg-gray-900 text-white">
+                    <h2 class="text-2xl font-black">${id ? 'Edit Category' : 'New Category'}</h2>
+                    <button onclick="closeModal()" class="hover:text-mcRed transition"><i data-lucide="x"></i></button>
+                </div>
+                <form onsubmit="saveCategory(event, '${id || ''}')" class="p-6 bg-white space-y-6">
+                    <div>
+                        <label class="block font-extrabold text-gray-700 mb-2">Category Name</label>
+                        <input type="text" id="cat_name" value="${cat.name}" required class="w-full p-3 border-2 border-gray-300 rounded-xl focus:border-gray-900 focus:outline-none font-bold" placeholder="e.g. English Books">
+                    </div>
+                    <div class="flex gap-3 pt-4">
+                        <button type="button" onclick="closeModal()" class="flex-1 bg-white border-2 border-gray-300 text-gray-700 py-3 rounded-full font-black hover:bg-gray-100 transition">Cancel</button>
+                        <button type="submit" class="flex-1 bg-gray-900 text-white py-3 rounded-full font-black hover:bg-black shadow-lg transition">Save</button>
+                    </div>
+                </form>
+            `);
+        }
+
+        async function saveCategory(e, id) {
+            e.preventDefault();
+            const name = document.getElementById('cat_name').value.trim();
+            const newId = id || 'cat_' + Date.now();
+            const cat = { id: newId, name };
+            
+            await dbPut('categories', cat);
+            const index = state.categories.findIndex(c => c.id === newId);
+            if(index > -1) state.categories[index] = cat;
+            else state.categories.push(cat);
+            
+            closeModal();
+            showToast('Category saved!');
+            adminTab('categories');
+        }
+
+        async function deleteCategory(id) {
+            const hasProducts = state.products.some(p => p.categoryId === id);
+            if(hasProducts) {
+                alert("Cannot delete category because it contains products. Delete or reassign the products first.");
+                return;
+            }
+            if(confirm("Are you sure you want to delete this category?")) {
+                await dbDelete('categories', id);
+                state.categories = state.categories.filter(c => c.id !== id);
+                showToast('Category deleted!');
+                adminTab('categories');
+            }
+        }
+
+        // ==========================================
+        // 7c. ADMIN: SETTINGS & BACKUP
+        // ==========================================
+        function renderAdminSettings(container) {
+            container.innerHTML = `
+                <h2 class="text-3xl font-black text-gray-800 mb-8">System Settings</h2>
+                
+                <div class="grid md:grid-cols-2 gap-6">
+                    <!-- General Settings (Logo & PIN) -->
+                    <div class="bg-gray-50 p-6 rounded-3xl border border-gray-200 shadow-sm flex flex-col gap-6">
+                        <div>
+                            <h3 class="font-black text-xl mb-4 text-gray-900 flex items-center gap-2 border-b pb-3"><i data-lucide="shield-alert" class="text-mcRed"></i> Security</h3>
+                            <label class="block font-bold text-gray-600 mb-2 text-sm uppercase tracking-wider">Admin PIN Code</label>
+                            <div class="flex gap-2">
+                                <input type="text" id="s_pin" value="${state.settings.adminPin}" class="flex-1 p-3 border-2 border-gray-300 rounded-xl font-mono text-lg font-bold text-center" placeholder="0000">
+                                <button onclick="saveSetting('adminPin', 's_pin')" class="bg-gray-900 text-white px-6 rounded-xl font-black hover:bg-black transition">Update</button>
+                            </div>
+                        </div>
+
+                        <div class="border-t pt-5">
+                            <label class="block font-bold text-gray-600 mb-2 text-sm uppercase tracking-wider flex justify-between">
+                                School Logo & Favicon
+                                <button onclick="saveSettingRawAndLogo('logoImage', document.getElementById('s_logo_base64').value)" class="text-mcRed hover:text-red-700">Save Logo</button>
+                            </label>
+                            <label class="cursor-pointer block border-2 border-dashed border-gray-300 bg-white hover:bg-gray-100 p-4 rounded-xl text-center transition">
+                                <i data-lucide="image" class="w-8 h-8 mx-auto text-gray-400 mb-2"></i>
+                                <span class="text-sm font-bold text-gray-600">Upload Image File</span>
+                                <input type="file" id="s_logo" accept="image/*" class="hidden" onchange="handleImageUpload(this, 's_logo_preview')">
+                            </label>
+                            <img id="s_logo_preview" src="${state.settings.logoImage || ''}" class="mt-3 mx-auto max-h-24 object-contain rounded-xl border border-gray-200 ${state.settings.logoImage ? '' : 'hidden'}">
+                            <input type="hidden" id="s_logo_base64" value="${state.settings.logoImage || ''}">
+                        </div>
+                    </div>
+
+                    <!-- Checkout Settings -->
+                    <div class="bg-gray-50 p-6 rounded-3xl border border-gray-200 shadow-sm flex flex-col">
+                        <h3 class="font-black text-xl mb-4 text-gray-900 flex items-center gap-2 border-b pb-3"><i data-lucide="smartphone" class="text-green-500"></i> Checkout Details</h3>
+                        <div class="mt-2 mb-5">
+                            <label class="block font-bold text-gray-600 mb-2 text-sm uppercase tracking-wider">WhatsApp Number</label>
+                            <div class="flex gap-2">
+                                <input type="text" id="s_wa" value="${state.settings.whatsappNumber || ''}" class="flex-1 p-3 border-2 border-gray-300 rounded-xl font-bold" placeholder="85620...">
+                                <button onclick="saveSetting('whatsappNumber', 's_wa')" class="bg-gray-900 text-white px-4 rounded-xl font-black hover:bg-black transition">Save</button>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-2 font-bold">Include country code. Example: 8562012345678</p>
+                        </div>
+                        
+                        <div class="border-t pt-5">
+                            <label class="block font-bold text-gray-600 mb-2 text-sm uppercase tracking-wider flex justify-between">
+                                BCEL OnePay QR
+                                <button onclick="saveSettingRaw('bcelQrImage', document.getElementById('s_qr_base64').value)" class="text-mcRed hover:text-red-700">Save QR</button>
+                            </label>
+                            <label class="cursor-pointer block border-2 border-dashed border-gray-300 bg-white hover:bg-gray-100 p-4 rounded-xl text-center transition">
+                                <i data-lucide="qr-code" class="w-8 h-8 mx-auto text-gray-400 mb-2"></i>
+                                <span class="text-sm font-bold text-gray-600">Upload Image File</span>
+                                <input type="file" id="s_qr" accept="image/*" class="hidden" onchange="handleImageUpload(this, 's_qr_preview')">
+                            </label>
+                            <img id="s_qr_preview" src="${state.settings.bcelQrImage || ''}" class="mt-3 mx-auto max-h-40 rounded-xl shadow-md border border-gray-200 ${state.settings.bcelQrImage ? '' : 'hidden'}">
+                            <input type="hidden" id="s_qr_base64" value="${state.settings.bcelQrImage || ''}">
+                        </div>
+                    </div>
+
+                    <!-- Data Management -->
+                    <div class="bg-yellow-100 p-6 rounded-3xl border border-yellow-300 shadow-sm md:col-span-2">
+                        <h3 class="font-black text-xl mb-4 text-gray-900 flex items-center gap-2 border-b border-yellow-300 pb-3"><i data-lucide="database" class="text-yellow-600"></i> Database Backup (JSON)</h3>
+                        <p class="text-sm text-gray-700 mb-6 font-bold">Use these tools to backup your entire store database (Products, Categories, Images) to a file, or restore from a previous backup.</p>
+                        <div class="flex flex-col sm:flex-row gap-4">
+                            <button onclick="exportData()" class="flex-1 bg-white border-2 border-gray-900 text-gray-900 py-4 rounded-xl font-black hover:bg-gray-900 hover:text-white transition flex items-center justify-center gap-2 shadow-sm">
+                                <i data-lucide="download-cloud"></i> Export Data
+                            </button>
+                            <label class="flex-1 bg-mcRed text-white py-4 rounded-xl font-black hover:bg-red-700 transition flex items-center justify-center gap-2 shadow-sm cursor-pointer">
+                                <i data-lucide="upload-cloud"></i> Import Data
+                                <input type="file" accept=".json" class="hidden" onchange="importData(event)">
+                            </label>
+                        </div>
+                        <p class="text-xs text-red-600 mt-4 font-black text-center text-center">⚠ WARNING: Importing a file will OVERWRITE all current store data in Firestore.</p>
+                    </div>
+                </div>
+            `;
+            lucide.createIcons();
+        }
+
+        async function saveSetting(key, inputId) {
+            const val = document.getElementById(inputId).value;
+            state.settings[key] = val;
+            await dbPut('settings', state.settings);
+            showToast('Settings Updated!');
+        }
+
+        async function saveSettingRaw(key, val) {
+            try {
+                showToast("Uploading... ⏳");
+                const finalUrl = await uploadImageIfNeeded(val, 'settings');
+                state.settings[key] = finalUrl;
+                await dbPut('settings', state.settings);
+                showToast('Settings Updated!');
+            } catch (err) {
+                alert("Failed to save to Firebase Storage. Error: " + err.message);
+            }
+        }
+
+        async function saveSettingRawAndLogo(key, val) {
+            try {
+                showToast("Uploading Logo... ⏳");
+                const finalUrl = await uploadImageIfNeeded(val, 'settings');
+                state.settings[key] = finalUrl;
+                await dbPut('settings', state.settings);
+                updateFavicon(finalUrl);
+                showToast('Logo Updated!');
+            } catch (err) {
+                alert("Failed to upload logo to Firebase. Error: " + err.message);
+            }
+        }
+
+        // ==========================================
+        // 8. JSON IMPORT / EXPORT (FIRESTORE)
+        // ==========================================
+        async function exportData() {
+            try {
+                const data = {
+                    products: await dbGetAll('products'),
+                    categories: await dbGetAll('categories'),
+                    settings: await dbGetAll('settings')
+                };
+                const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `neerada_store_backup_${new Date().toISOString().slice(0,10)}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+                showToast("Export successful!");
+            } catch(e) {
+                alert("Error exporting data: " + e.message);
+            }
+        }
+
+        async function importData(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            if(!confirm("Are you sure? This will wipe the current Firestore database and replace it with the imported file.")) {
+                event.target.value = '';
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    if (data.products && data.categories && data.settings) {
+                        
+                        await dbClear('products');
+                        await dbClear('categories');
+                        await dbClear('settings');
+                        
+                        for (const p of data.products) await dbPut('products', p);
+                        for (const c of data.categories) await dbPut('categories', c);
+                        for (const s of data.settings) await dbPut('settings', s);
+                        
+                        alert('Import successful! The app will now reload.');
+                        location.reload();
+                    } else {
+                        alert('Invalid JSON format. Make sure this is a Neerada Store backup file.');
+                    }
+                } catch(err) {
+                    alert('Error reading JSON file: ' + err.message);
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        // ==========================================
+        // WINDOW EXPORTS FOR HTML ONCLICK CALLS
+        // ==========================================
+        window.navigate = navigate;
+        window.openCart = openCart;
+        window.promptAdmin = promptAdmin;
+        window.setMainGroup = setMainGroup;
+        window.setSubCategory = setSubCategory;
+        window.addToCart = addToCart;
+        window.changeQty = changeQty;
+        window.renderCheckoutModal = renderCheckoutModal;
+        window.closeModal = closeModal;
+        window.toggleQR = toggleQR;
+        window.submitOrder = submitOrder;
+        window.checkAdminPin = checkAdminPin;
+        window.exitAdmin = exitAdmin;
+        window.adminTab = adminTab;
+        window.openProductModal = openProductModal;
+        window.handleImageUpload = handleImageUpload;
+        window.saveProduct = saveProduct;
+        window.deleteProduct = deleteProduct;
+        window.promptCategoryModal = promptCategoryModal;
+        window.saveCategory = saveCategory;
+        window.deleteCategory = deleteCategory;
+        window.saveSetting = saveSetting;
+        window.saveSettingRaw = saveSettingRaw;
+        window.saveSettingRawAndLogo = saveSettingRawAndLogo;
+        window.exportData = exportData;
+        window.importData = importData;
+
+        // Boot
+        document.addEventListener('DOMContentLoaded', initApp);
+        // Fallback execution if module loaded after DOMContentLoaded
+        if (document.readyState === 'complete' || document.readyState === 'interactive') {
+            initApp();
+        }
+
+    </script>
+</body>
+</html>
