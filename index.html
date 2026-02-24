@@ -114,6 +114,30 @@
 
         const formatLAKManual = (num) => Number(num).toLocaleString('en-US') + ' LAK';
 
+        // Helper to consistently sort categories globally
+        function sortCategoriesArray(arr) {
+            const hierarchy = ['Pre-K', 'K1 - K3', 'Kindergarten', 'P1 - P5', 'Primary', 'S1 - S7', 'Secondary'];
+            return arr.sort((a, b) => {
+                let nA = a.name || a.subName || '';
+                let nB = b.name || b.subName || '';
+                let iA = 99, iB = 99;
+                for(let i=0; i<hierarchy.length; i++) { if(nA.includes(hierarchy[i])) { iA = i; break; } }
+                for(let i=0; i<hierarchy.length; i++) { if(nB.includes(hierarchy[i])) { iB = i; break; } }
+                if(iA !== iB) return iA - iB;
+                return nA.localeCompare(nB);
+            });
+        }
+
+        // Helper to format number input with commas
+        window.formatNumberInput = function(input) {
+            let val = input.value.replace(/[^0-9]/g, '');
+            if (val.length > 0) {
+                input.value = Number(val).toLocaleString('en-US');
+            } else {
+                input.value = '';
+            }
+        };
+
         // --- I18N / TRANSLATIONS ---
         const i18n = {
             en: {
@@ -161,7 +185,7 @@
         const catTrans = {
             'School Uniforms': 'ເຄື່ອງແບບນັກຮຽນ', 'PE Uniforms': 'ເຄື່ອງແບບພະລະ',
             'Lao Books': 'ປຶ້ມພາສາລາວ', 'English Books': 'ປຶ້ມພາສາອັງກິດ', 'Notebooks': 'ປຶ້ມຂຽນ',
-            'Pre-K': 'ກຽມອະນຸບານ', 'K1 - K3': 'ອະນຸບານ 1-3', 'P1 - P5': 'ປະຖົມ 1-5', 'S1 - S7': 'ມັດທະຍົມ 1-7', 'General': 'ທົ່ວໄປ'
+            'Pre-K': 'ກຽມອະນຸບານ', 'K1 - K3': 'ອະນຸບານ 1-3', 'P1 - P5': 'ປະຖົມ 1-5', 'S1 - S7': 'ມັດທະຍົມ 1-7', 'Kindergarten': 'ອະນຸບານ', 'Primary': 'ປະຖົມ', 'Secondary': 'ມັດທະຍົມ', 'General': 'ທົ່ວໄປ'
         };
 
         const t = (key) => i18n[state.lang][key] || key;
@@ -172,7 +196,6 @@
             localStorage.setItem('neerada_lang', state.lang);
             renderApp();
             if(document.getElementById('modal-container').innerHTML !== '') {
-                // simple reload of cart modal if open
                 if(document.getElementById('modal-container').innerText.includes(i18n['en'].checkout_title) || document.getElementById('modal-container').innerText.includes(i18n['lo'].checkout_title)) {
                     renderCheckoutModal();
                 } else if(document.getElementById('modal-container').innerText.includes(i18n['en'].cart_title) || document.getElementById('modal-container').innerText.includes(i18n['lo'].cart_title)){
@@ -444,7 +467,7 @@
                         <!-- Left: Brand -->
                         <div class="flex items-center gap-2 sm:gap-3 cursor-pointer group" onclick="navigate('home')">
                             ${logoHtml}
-                            <h1 class="text-mcYellow text-xl sm:text-2xl font-black tracking-widest drop-shadow-md whitespace-nowrap" style="font-family: 'Arial Black', sans-serif;">NEERADA STORE</h1>
+                            <h1 class="text-mcYellow text-xl sm:text-2xl font-black tracking-widest drop-shadow-md whitespace-nowrap" style="font-family: 'Arial Black', sans-serif;">Neerada Store</h1>
                         </div>
 
                         <!-- Center: Desktop Links -->
@@ -568,15 +591,8 @@
             let subPillsHtml = '';
             if (state.activeMainGroup && groups[state.activeMainGroup]) {
                 
-                // Sort Hierarchy so Pre-K is always first
-                const hierarchy = ['Pre-K', 'K1 - K3', 'P1 - P5', 'S1 - S7'];
-                groups[state.activeMainGroup].sort((a,b) => {
-                    let idxA = hierarchy.indexOf(a.subName);
-                    let idxB = hierarchy.indexOf(b.subName);
-                    if(idxA === -1) idxA = 99;
-                    if(idxB === -1) idxB = 99;
-                    return idxA - idxB;
-                });
+                // Sort Hierarchy so Pre-K is always first and flows Kindergarten -> Primary -> Secondary
+                groups[state.activeMainGroup] = sortCategoriesArray(groups[state.activeMainGroup]);
 
                 const isAllActive = state.activeCategory === 'all_in_group';
                 subPillsHtml += `<button onclick="setSubCategory('all_in_group')" class="whitespace-nowrap px-4 py-2 rounded-full font-bold text-sm border-2 transition-all ${isAllActive ? 'bg-mcYellow text-black border-mcYellow shadow-sm' : 'bg-white text-gray-600 border-gray-200 hover:border-mcYellow hover:bg-yellow-50'}">${t('all_items')} ${tCat(state.activeMainGroup)}</button>`;
@@ -1219,7 +1235,8 @@
 
         function openProductModal(id = null) {
             let p = id ? state.products.find(x => x.id === id) : { id: '', name: '', categoryId: '', price: '', sizes: '', image: '' };
-            let catOptions = state.categories.map(c => `<option value="${c.id}" ${p.categoryId === c.id ? 'selected' : ''}>${c.name}</option>`).join('');
+            let sortedCats = sortCategoriesArray([...state.categories]);
+            let catOptions = sortedCats.map(c => `<option value="${c.id}" ${p.categoryId === c.id ? 'selected' : ''}>${c.name}</option>`).join('');
 
             openModal(`
                 <div class="p-6 border-b-2 border-gray-100 flex justify-between items-center bg-gray-900 text-white shrink-0">
@@ -1241,7 +1258,7 @@
                         </div>
                         <div>
                             <label class="block font-extrabold text-gray-700 mb-2">Price (in LAK) <span class="text-red-500">*</span></label>
-                            <input type="number" id="p_price" value="${p.price}" required class="w-full p-3 border-2 border-gray-300 rounded-xl focus:border-gray-900 focus:outline-none font-bold" placeholder="50000">
+                            <input type="text" id="p_price" value="${p.price ? Number(p.price).toLocaleString('en-US') : ''}" onkeyup="formatNumberInput(this)" required class="w-full p-3 border-2 border-gray-300 rounded-xl focus:border-gray-900 focus:outline-none font-bold" placeholder="50,000">
                         </div>
                         <div>
                             <label class="block font-extrabold text-gray-700 mb-2">Sizes (Comma separated)</label>
@@ -1309,13 +1326,14 @@
 
             const newId = id || 'prod_' + Date.now();
             let finalImageBase64 = document.getElementById('p_image_base64').value;
+            let formattedPrice = document.getElementById('p_price').value.replace(/,/g, '');
             
             try {
                 const product = {
                     id: newId,
                     name: document.getElementById('p_name').value.trim(),
                     categoryId: document.getElementById('p_cat').value,
-                    price: Number(document.getElementById('p_price').value),
+                    price: Number(formattedPrice),
                     sizes: document.getElementById('p_sizes').value.trim(),
                     image: finalImageBase64
                 };
@@ -1369,7 +1387,9 @@
                         </thead>
                         <tbody class="divide-y divide-gray-200">
             `;
-            state.categories.forEach(c => {
+
+            let sortedCats = sortCategoriesArray([...state.categories]);
+            sortedCats.forEach(c => {
                 html += `
                     <tr class="hover:bg-gray-50 transition">
                         <td class="p-4 font-black text-gray-900 text-lg">${c.name}</td>
@@ -1664,4 +1684,3 @@
     </script>
 </body>
 </html>
-
