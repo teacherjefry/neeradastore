@@ -54,7 +54,7 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, doc, setDoc, getDocs, deleteDoc, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
+        import { getStorage, ref, uploadString, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
 
         // ==========================================
         // 1. FIREBASE CONFIGURATION & INIT
@@ -244,7 +244,7 @@
 
         function showToast(msg) {
             const toast = document.createElement('div');
-            toast.className = 'fixed bottom-24 left-1/2 transform -translate-x-1/2 bg-gray-900 text-mcYellow font-bold px-6 py-3 rounded-full shadow-2xl z-50 animate-bounce border-2 border-mcYellow whitespace-nowrap';
+            toast.className = 'fixed bottom-24 left-1/2 transform -translate-x-1/2 bg-gray-900 text-mcYellow font-bold px-6 py-3 rounded-full shadow-2xl z-50 animate-bounce border-2 border-mcYellow whitespace-nowrap z-[9999]';
             toast.innerText = msg;
             document.body.appendChild(toast);
             setTimeout(() => toast.remove(), 2500);
@@ -264,6 +264,33 @@
         function closeModal() {
             document.getElementById('modal-container').innerHTML = '';
         }
+
+        // Image Compressor (Significantly speeds up uploading to Firebase)
+        window.compressImage = function(file, maxWidth, maxHeight, quality, callback) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const img = new Image();
+                img.onload = function() {
+                    const canvas = document.createElement('canvas');
+                    let width = img.width;
+                    let height = img.height;
+
+                    if (width > height) {
+                        if (width > maxWidth) { height *= maxWidth / width; width = maxWidth; }
+                    } else {
+                        if (height > maxHeight) { width *= maxHeight / height; height = maxHeight; }
+                    }
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    // Return highly optimized Base64
+                    callback(canvas.toDataURL('image/jpeg', quality));
+                }
+                img.src = e.target.result;
+            }
+            reader.readAsDataURL(file);
+        };
 
         // Parse categories into groups based on naming convention "Main (Sub)"
         function getCategoryGroups() {
@@ -376,7 +403,7 @@
                 featuredHtml = `
                     <div class="w-full px-4 sm:px-6 lg:px-8 py-10">
                         <h3 class="text-3xl font-black text-gray-900 mb-6 border-l-8 border-mcRed pl-4">Featured Items</h3>
-                        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 sm:gap-6">
                             ${featured.map(p => generateProductCard(p)).join('')}
                         </div>
                     </div>
@@ -458,14 +485,14 @@
 
             return `
                 <div class="bg-yellow-100 shadow-inner sticky top-[113px] sm:top-[72px] z-30 border-b-2 border-yellow-200">
-                    <div class="w-full px-4 sm:px-6 lg:px-8 py-3 sm:py-4 flex gap-3 sm:gap-4 overflow-x-auto no-scrollbar items-center">
+                    <div class="w-full px-4 sm:px-6 lg:px-8 py-3 sm:py-4 flex gap-3 sm:gap-4 overflow-x-auto no-scrollbar items-center md:justify-center">
                         ${mainPillsHtml}
                     </div>
                 </div>
 
                 ${subPillsHtml ? `
                 <div class="bg-white shadow-sm border-b border-gray-200">
-                    <div class="w-full px-4 sm:px-6 lg:px-8 py-3 flex gap-2 sm:gap-3 overflow-x-auto no-scrollbar items-center">
+                    <div class="w-full px-4 sm:px-6 lg:px-8 py-3 flex gap-2 sm:gap-3 overflow-x-auto no-scrollbar items-center md:justify-center">
                         ${subPillsHtml}
                     </div>
                 </div>` : ''}
@@ -1100,7 +1127,7 @@
                                 <label class="cursor-pointer bg-gray-100 border-2 border-dashed border-gray-300 hover:bg-gray-200 transition p-4 rounded-xl flex flex-col items-center justify-center w-full relative">
                                     <i data-lucide="upload-cloud" class="w-8 h-8 text-gray-500 mb-2"></i>
                                     <span class="text-sm font-bold text-gray-600" id="p_image_preview_loading_text">Select Image File</span>
-                                    <span id="p_image_preview_loading" class="hidden text-sm font-bold text-blue-600 mt-1 absolute bottom-2"><i class="lucide-loader animate-spin inline w-4 h-4"></i> Uploading...</span>
+                                    <span id="p_image_preview_loading" class="hidden text-sm font-bold text-blue-600 mt-1 absolute bottom-2"><i class="lucide-loader animate-spin inline w-4 h-4"></i> Compressing & Uploading...</span>
                                     <input type="file" accept="image/*" class="hidden" onchange="handleImageUpload(this, 'p_image_preview', 'products')">
                                 </label>
                             </div>
@@ -1116,7 +1143,7 @@
             `);
         }
 
-        // Fast Firebase direct upload on file selection
+        // Fast Firebase direct upload using compressed data
         window.handleImageUpload = async function(input, previewId, pathPrefix) {
             if (input.files && input.files[0]) {
                 const file = input.files[0];
@@ -1126,22 +1153,29 @@
 
                 if(loadingText) loadingText.classList.remove('hidden');
 
-                try {
-                    const storageRef = ref(storage, `${pathPrefix}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.]/g, '')}`);
-                    await uploadBytes(storageRef, file);
-                    const url = await getDownloadURL(storageRef);
+                // Compress the image before uploading to keep Firebase Storage fast and limits low
+                window.compressImage(file, 800, 800, 0.7, async (compressedBase64) => {
+                    try {
+                        const safeName = file.name.replace(/[^a-zA-Z0-9]/g, '');
+                        const storageRef = ref(storage, `${pathPrefix}/${Date.now()}_${safeName}.jpg`);
+                        
+                        // Upload the highly optimized Base64 image
+                        await uploadString(storageRef, compressedBase64, 'data_url');
+                        const url = await getDownloadURL(storageRef);
 
-                    if(preview) {
-                        preview.src = url;
-                        preview.classList.remove('hidden');
+                        if(preview) {
+                            preview.src = url;
+                            preview.classList.remove('hidden');
+                        }
+                        if(hiddenInput) hiddenInput.value = url;
+                        showToast("Image Optimized & Uploaded! 📸");
+                    } catch(e) {
+                        alert("Upload failed. Error: " + e.message);
+                        console.error(e);
+                    } finally {
+                        if(loadingText) loadingText.classList.add('hidden');
                     }
-                    if(hiddenInput) hiddenInput.value = url;
-                    showToast("Image Uploaded! 📸");
-                } catch(e) {
-                    alert("Upload failed: " + e.message);
-                } finally {
-                    if(loadingText) loadingText.classList.add('hidden');
-                }
+                });
             }
         };
 
