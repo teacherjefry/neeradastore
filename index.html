@@ -114,8 +114,9 @@
             currentView: localStorage.getItem('neerada_view') || 'home', 
             activeMainGroup: localStorage.getItem('neerada_group') || null,
             activeCategory: localStorage.getItem('neerada_cat') || 'all_in_group',
+            searchQuery: '',
             isAdmin: localStorage.getItem('neerada_admin') === 'true',
-            isLocked: false, // Now managed globally via Firestore real-time snapshot
+            isLocked: false, 
             lang: localStorage.getItem('neerada_lang') || 'en'
         };
 
@@ -166,7 +167,7 @@
                 order_sent: "Order Sent!", 
                 order_sent_desc: "Your order was recorded! Please send your payment receipt via WhatsApp to confirm and process your order.",
                 continue_shopping: "Continue Shopping", alert_name: "Please enter your name.",
-                size: "Size"
+                size: "Size", search_placeholder: "Search products..."
             },
             lo: {
                 home: "ໜ້າຫຼັກ", products: "ສິນຄ້າ", login: "ເຂົ້າສູ່ລະບົບ",
@@ -186,7 +187,7 @@
                 order_sent: "ສົ່ງຄຳສັ່ງຊື້ແລ້ວ!", 
                 order_sent_desc: "ຄຳສັ່ງຊື້ຂອງທ່ານຖືກບັນທຶກແລ້ວ! ກະລຸນາສົ່ງໃບບິນການຊຳລະເງິນທາງ WhatsApp ເພື່ອຢືນຢັນ ແລະ ດຳເນີນການ.",
                 continue_shopping: "ສືບຕໍ່ຊື້ສິນຄ້າ", alert_name: "ກະລຸນາປ້ອນຊື່ຂອງທ່ານ.",
-                size: "ຂະໜາດ"
+                size: "ຂະໜາດ", search_placeholder: "ຄົ້ນຫາສິນຄ້າ..."
             }
         };
 
@@ -355,6 +356,7 @@
 
         function navigate(view) {
             state.currentView = view;
+            state.searchQuery = ''; // clear search on navigation
             localStorage.setItem('neerada_view', view);
             if (view === 'products') {
                 const groups = Object.keys(getCategoryGroups());
@@ -640,8 +642,48 @@
         }
 
         // ==========================================
-        // 5b. PRODUCTS VIEW
+        // 5b. PRODUCTS VIEW & SEARCH
         // ==========================================
+        function getProductsGridHtml() {
+            const groups = getCategoryGroups();
+            let filteredProducts = [];
+            
+            if (state.activeMainGroup && groups[state.activeMainGroup]) {
+                if (state.activeCategory === 'all_in_group') {
+                    const groupCatIds = groups[state.activeMainGroup].map(g => g.id);
+                    filteredProducts = state.products.filter(p => groupCatIds.includes(p.categoryId));
+                } else {
+                    filteredProducts = state.products.filter(p => p.categoryId === state.activeCategory);
+                }
+            } else {
+                filteredProducts = state.products;
+            }
+
+            if (state.searchQuery && state.searchQuery.trim() !== '') {
+                filteredProducts = filteredProducts.filter(p => p.name.toLowerCase().includes(state.searchQuery));
+            }
+
+            if (filteredProducts.length === 0) {
+                return `<div class="w-full py-24 text-center text-gray-500 font-black text-2xl flex flex-col items-center bg-white rounded-3xl border-4 border-dashed border-gray-200"><i data-lucide="package-open" class="w-24 h-24 mb-4 text-gray-300"></i>${t('no_products')}</div>`;
+            }
+
+            return filteredProducts.map(p => `
+                <div class="w-[45%] sm:w-[30%] md:w-[22%] lg:w-[220px] xl:w-[240px] flex shrink-0 justify-center">
+                    ${generateProductCard(p)}
+                </div>
+            `).join('');
+        }
+
+        function updateSearch(val) {
+            state.searchQuery = val.toLowerCase();
+            const container = document.getElementById('product-grid-container');
+            if(container) {
+                container.innerHTML = getProductsGridHtml();
+                lucide.createIcons();
+            }
+        }
+        window.updateSearch = updateSearch;
+
         function getProductsHTML() {
             const groups = getCategoryGroups();
             const groupNames = Object.keys(groups);
@@ -665,20 +707,6 @@
                 });
             }
 
-            let filteredProducts = [];
-            if (state.activeMainGroup && groups[state.activeMainGroup]) {
-                if (state.activeCategory === 'all_in_group') {
-                    const groupCatIds = groups[state.activeMainGroup].map(g => g.id);
-                    filteredProducts = state.products.filter(p => groupCatIds.includes(p.categoryId));
-                } else {
-                    filteredProducts = state.products.filter(p => p.categoryId === state.activeCategory);
-                }
-            }
-
-            let productsGridHtml = filteredProducts.length > 0 
-                ? filteredProducts.map(p => generateProductCard(p)).join('')
-                : `<div class="col-span-full py-24 text-center text-gray-500 font-black text-2xl flex flex-col items-center w-full bg-white rounded-3xl border-4 border-dashed border-gray-200"><i data-lucide="package-open" class="w-24 h-24 mb-4 text-gray-300"></i>${t('no_products')}</div>`;
-
             return `
                 <div class="bg-yellow-100 shadow-inner sticky top-[115px] sm:top-[80px] z-30 border-b-[4px] border-mcYellow">
                     <div class="w-full px-4 sm:px-6 lg:px-8 py-3 sm:py-4 flex gap-3 sm:gap-4 overflow-x-auto no-scrollbar items-center md:justify-center">
@@ -693,9 +721,16 @@
                     </div>
                 </div>` : ''}
 
-                <div class="w-full px-4 sm:px-6 lg:px-8 py-8 sm:py-10 flex-1 max-w-[1400px] mx-auto">
-                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6 justify-center place-content-center">
-                        ${productsGridHtml}
+                <div class="w-full px-4 sm:px-6 lg:px-8 py-6 pb-2 max-w-[1400px] mx-auto flex justify-center">
+                    <div class="relative w-full max-w-lg">
+                        <i data-lucide="search" class="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-6 h-6"></i>
+                        <input type="text" id="searchInput" onkeyup="updateSearch(this.value)" value="${state.searchQuery || ''}" placeholder="${t('search_placeholder')}" class="w-full pl-12 pr-4 py-3 sm:py-4 rounded-full border-[4px] border-gray-200 focus:border-mcYellow outline-none font-bold text-gray-700 shadow-sm transition-colors text-lg">
+                    </div>
+                </div>
+
+                <div class="w-full px-4 sm:px-6 lg:px-8 py-4 sm:py-6 flex-1 max-w-[1400px] mx-auto">
+                    <div id="product-grid-container" class="flex flex-wrap justify-center items-stretch gap-4 sm:gap-6">
+                        ${getProductsGridHtml()}
                     </div>
                 </div>
             `;
@@ -704,6 +739,7 @@
         function setMainGroup(gName) {
             state.activeMainGroup = gName;
             state.activeCategory = 'all_in_group';
+            state.searchQuery = ''; // Clear search
             localStorage.setItem('neerada_group', gName);
             localStorage.setItem('neerada_cat', 'all_in_group');
             renderApp();
@@ -712,6 +748,7 @@
 
         function setSubCategory(catId) {
             state.activeCategory = catId;
+            state.searchQuery = ''; // Clear search
             localStorage.setItem('neerada_cat', catId);
             renderApp();
         }
@@ -1357,7 +1394,7 @@
             lucide.createIcons();
         }
 
-        window.openProductModal = function(id = null) {
+        function openProductModal(id = null) {
             let p = id ? state.products.find(x => x.id === id) : { id: '', name: '', categoryId: '', price: '', sizes: '', image: '', isFeatured: false, isNewArrival: false };
             let sortedCats = sortCategoriesArray([...state.categories]);
             let catOptions = sortedCats.map(c => `<option value="${c.id}" ${p.categoryId === c.id ? 'selected' : ''}>${c.name}</option>`).join('');
@@ -1664,9 +1701,9 @@
                                 </div>
                                 <div class="flex items-center gap-6">
                                     <label class="cursor-pointer flex-1 bg-gray-50 border-[3px] border-dashed border-gray-300 hover:border-gray-500 hover:bg-gray-100 transition-colors p-6 rounded-2xl flex flex-col items-center justify-center relative min-h-[140px] group">
-                                        <div class="bg-white p-3 rounded-full shadow-sm border-2 border-gray-200 mb-3 group-hover:scale-110 transition-transform"><i data-lucide="upload" class="w-6 h-6 text-gray-500"></i></div>
-                                        <span class="text-xs font-black text-gray-600 uppercase tracking-widest text-center">Select File</span>
-                                        <span id="s_logo_status" class="text-xs font-bold text-gray-500 mt-2 absolute bottom-2"></span>
+                                        <div class="bg-white p-3 rounded-full shadow-sm border-2 border-gray-200 mb-3 group-hover:scale-110 transition-transform"><i data-lucide="upload" class="w-6 h-6 text-gray-500" id="s_logo_preview_loading_icon"></i></div>
+                                        <span class="text-xs font-black text-gray-600 uppercase tracking-widest text-center" id="s_logo_preview_loading_text">Select File</span>
+                                        <span id="s_logo_preview_loading" class="hidden text-xs font-black text-blue-600 mt-2 absolute bottom-3 bg-blue-50 px-3 py-1 rounded-full border border-blue-200"><i class="lucide-loader animate-spin inline w-4 h-4 mr-1"></i> Optimizing...</span>
                                         <input type="file" accept="image/*" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" onchange="handleImageUpload(this, 's_logo_base64', 's_logo_status', 's_logo_preview')">
                                     </label>
                                     <div class="w-32 h-32 bg-gray-100 rounded-2xl border-[3px] border-gray-200 flex items-center justify-center p-2 relative shadow-inner overflow-hidden shrink-0">
@@ -1684,10 +1721,10 @@
                                 </div>
                                 <label class="cursor-pointer block bg-gray-50 border-[3px] border-dashed border-gray-300 hover:border-gray-500 hover:bg-gray-100 transition-colors p-6 rounded-2xl text-center relative group min-h-[160px] flex flex-col items-center justify-center overflow-hidden">
                                     <div class="z-10 bg-white/80 backdrop-blur-sm p-3 rounded-xl border-2 border-white shadow-sm group-hover:scale-105 transition-transform text-center mb-2">
-                                        <i data-lucide="image" class="w-6 h-6 mx-auto text-gray-600 mb-1"></i>
-                                        <span class="text-xs font-black text-gray-700 uppercase tracking-widest">Upload Model Photo</span>
+                                        <i data-lucide="image" class="w-6 h-6 mx-auto text-gray-600 mb-1" id="s_hero_preview_loading_icon"></i>
+                                        <span class="text-xs font-black text-gray-700 uppercase tracking-widest" id="s_hero_preview_loading_text">Upload Model Photo</span>
                                     </div>
-                                    <span id="s_hero_status" class="z-10 text-xs font-bold text-gray-500 mt-2 bg-white/80 px-2 rounded"></span>
+                                    <span id="s_hero_preview_loading" class="hidden text-xs font-black text-blue-600 z-10 bg-white px-3 py-1 rounded-full border border-blue-200 shadow-sm"><i class="lucide-loader animate-spin inline w-4 h-4 mr-1"></i> Optimizing...</span>
                                     <img id="s_hero_preview" src="${state.settings.heroImage || ''}" class="absolute inset-0 w-full h-full object-cover opacity-30 ${state.settings.heroImage ? '' : 'hidden'}">
                                     <input type="file" accept="image/*" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20" onchange="handleImageUpload(this, 's_hero_base64', 's_hero_status', 's_hero_preview')">
                                 </label>
@@ -1724,8 +1761,8 @@
                                         <input type="hidden" id="s_qr_base64" value="${state.settings.bcelQrImage || ''}">
                                     </div>
                                     <label class="cursor-pointer w-full sm:w-64 bg-white border-[3px] border-gray-300 hover:border-gray-500 hover:bg-gray-50 transition-colors py-3 rounded-xl text-center relative shadow-sm">
-                                        <span class="text-sm font-black text-gray-700 uppercase tracking-widest"><i data-lucide="upload" class="inline w-4 h-4 mr-1 -mt-1"></i> Select QR Image</span>
-                                        <span id="s_qr_status" class="block text-xs font-bold text-gray-500 mt-1"></span>
+                                        <span class="text-sm font-black text-gray-700 uppercase tracking-widest" id="s_qr_preview_loading_text"><i data-lucide="upload" class="inline w-4 h-4 mr-1 -mt-1" id="s_qr_preview_loading_icon"></i> Select QR Image</span>
+                                        <span id="s_qr_preview_loading" class="hidden text-sm font-black text-blue-600"><i class="lucide-loader animate-spin inline w-4 h-4 mr-1"></i> Optimizing...</span>
                                         <input type="file" accept="image/*" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" onchange="handleImageUpload(this, 's_qr_base64', 's_qr_status', 's_qr_preview')">
                                     </label>
                                 </div>
