@@ -566,38 +566,26 @@
                 `;
             }
 
-            // Carousel implementation for "New Arrivals"
-            const carouselItems = state.products.filter(p => p.isNewArrival);
-            let carouselHtml = '';
-            if (carouselItems.length > 0) {
-                const slides = carouselItems.map(p => `
-                    <div class="min-w-[220px] max-w-[220px] sm:min-w-[260px] sm:max-w-[260px] snap-center snap-always bg-white rounded-[2rem] shadow-[0_8px_15px_rgba(0,0,0,0.1)] border-[4px] border-transparent hover:border-mcRed hover:shadow-2xl transition-all flex flex-col shrink-0 group cursor-pointer relative overflow-hidden">
-                        <div class="absolute top-0 right-0 bg-mcRed text-white text-[10px] sm:text-xs font-black px-3 py-1 rounded-bl-xl z-20 shadow-sm uppercase tracking-wider">NEW</div>
-                        <div class="h-40 sm:h-56 bg-white rounded-t-2xl flex items-center justify-center overflow-hidden border-b-[4px] border-gray-100 p-2 relative group-hover:bg-yellow-50 transition-colors duration-300">
-                            ${p.image ? `<img src="${p.image}" class="w-full h-full object-contain drop-shadow-md group-hover:scale-105 transition-transform duration-300">` : `<i data-lucide="image" class="w-12 h-12 text-gray-300"></i>`}
-                        </div>
-                        <div class="p-4 sm:p-5 flex flex-col flex-1 items-start text-left bg-white">
-                            <h4 class="font-extrabold text-sm sm:text-base leading-tight text-gray-900 mb-2 line-clamp-2 w-full">${p.name}</h4>
-                            <div class="text-mcRed font-black text-lg sm:text-xl mt-auto drop-shadow-sm mb-4">${formatLAKManual(p.price)}</div>
-                            <button onclick="addToCart('${p.id}')" class="w-full bg-mcYellow text-black font-black text-sm sm:text-base py-3.5 rounded-xl shadow-[0_5px_0_rgba(200,150,0,1)] hover:translate-y-[2px] hover:shadow-[0_3px_0_rgba(200,150,0,1)] active:shadow-none active:translate-y-[5px] transition-all uppercase tracking-wider flex justify-center items-center gap-2">
-                                <i data-lucide="plus" class="w-5 h-5 stroke-[3]"></i> ${t('add')}
-                            </button>
-                        </div>
-                    </div>
-                `).join('');
-
-                carouselHtml = `
+            // Carousel implementation for "New Arrivals" -> Converted to Flexible Grid
+            const newArrivalItems = state.products.filter(p => p.isNewArrival);
+            let newArrivalsHtml = '';
+            if (newArrivalItems.length > 0) {
+                newArrivalsHtml = `
                     <div class="w-full px-4 sm:px-6 lg:px-8 py-8 max-w-[1400px] mx-auto bg-stripes rounded-[3rem] mb-8 border-[6px] border-white shadow-xl relative overflow-hidden">
-                        <div class="flex items-center gap-4 mb-8 relative z-10 pl-2">
+                        <div class="flex flex-col sm:flex-row items-center gap-4 mb-8 relative z-10 pl-2 justify-center text-center">
                             <div class="bg-mcRed p-3.5 rounded-full shadow-md"><i data-lucide="zap" class="w-8 h-8 text-mcYellow fill-current"></i></div>
                             <div>
                                 <h3 class="text-2xl sm:text-3xl font-black text-gray-900 uppercase tracking-tight">${t('new_arrivals')}</h3>
                                 <p class="text-gray-700 font-bold text-sm hidden sm:block">${t('new_arrivals_desc')}</p>
                             </div>
                         </div>
-                        <div class="flex gap-4 sm:gap-6 overflow-x-auto snap-x snap-mandatory no-scrollbar pb-8 pt-2 px-2 items-stretch relative z-10">
-                            ${slides}
-                            <div class="min-w-[4px] sm:min-w-[20px] shrink-0"></div>
+                        <div class="flex flex-wrap justify-center items-stretch gap-4 sm:gap-6 relative z-10 pb-4 px-2">
+                            ${newArrivalItems.map(p => `
+                                <div class="w-[45%] sm:w-[30%] md:w-[22%] lg:w-[220px] xl:w-[240px] flex shrink-0 relative justify-center">
+                                    <div class="absolute top-0 right-0 bg-mcRed text-white text-[10px] sm:text-xs font-black px-3 py-1 rounded-bl-xl rounded-tr-[1.5rem] z-20 shadow-sm uppercase tracking-wider">NEW</div>
+                                    ${generateProductCard(p)}
+                                </div>
+                            `).join('')}
                         </div>
                     </div>
                 `;
@@ -635,7 +623,7 @@
                         </div>
                     </div>
 
-                    ${carouselHtml}
+                    ${newArrivalsHtml}
                     ${featuredHtml}
                 </div>
             `;
@@ -645,22 +633,22 @@
         // 5b. PRODUCTS VIEW & SEARCH
         // ==========================================
         function getProductsGridHtml() {
-            const groups = getCategoryGroups();
-            let filteredProducts = [];
-            
-            if (state.activeMainGroup && groups[state.activeMainGroup]) {
-                if (state.activeCategory === 'all_in_group') {
-                    const groupCatIds = groups[state.activeMainGroup].map(g => g.id);
-                    filteredProducts = state.products.filter(p => groupCatIds.includes(p.categoryId));
-                } else {
-                    filteredProducts = state.products.filter(p => p.categoryId === state.activeCategory);
-                }
-            } else {
-                filteredProducts = state.products;
-            }
+            let filteredProducts = state.products;
 
+            // Universal Search bypasses category filters
             if (state.searchQuery && state.searchQuery.trim() !== '') {
                 filteredProducts = filteredProducts.filter(p => p.name.toLowerCase().includes(state.searchQuery));
+            } else {
+                // Apply normal category filtering
+                const groups = getCategoryGroups();
+                if (state.activeMainGroup && groups[state.activeMainGroup]) {
+                    if (state.activeCategory === 'all_in_group') {
+                        const groupCatIds = groups[state.activeMainGroup].map(g => g.id);
+                        filteredProducts = filteredProducts.filter(p => groupCatIds.includes(p.categoryId));
+                    } else {
+                        filteredProducts = filteredProducts.filter(p => p.categoryId === state.activeCategory);
+                    }
+                }
             }
 
             if (filteredProducts.length === 0) {
