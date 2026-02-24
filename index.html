@@ -57,7 +57,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, doc, setDoc, getDocs, deleteDoc, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, doc, setDoc, getDocs, deleteDoc, writeBatch, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // ==========================================
         // 1. FIREBASE CONFIGURATION & INIT
@@ -108,7 +108,7 @@
             activeMainGroup: localStorage.getItem('neerada_group') || null,
             activeCategory: localStorage.getItem('neerada_cat') || 'all_in_group',
             isAdmin: localStorage.getItem('neerada_admin') === 'true',
-            isLocked: localStorage.getItem('terminal_locked') === 'true',
+            isLocked: false, // Now managed globally via Firestore real-time snapshot
             lang: localStorage.getItem('neerada_lang') || 'en'
         };
 
@@ -214,7 +214,8 @@
                     adminPin: '0000',
                     whatsappNumber: '85620XXXXXXXX',
                     bcelQrImage: '',
-                    logoImage: ''
+                    logoImage: '',
+                    terminalLocked: false
                 });
             }
             const cats = await dbGetAll('categories');
@@ -264,6 +265,7 @@
                 state.categories = categories;
                 state.settings = settingsArr[0] || {};
                 state.orders = orders.sort((a,b) => b.timestamp - a.timestamp); // newest first
+                state.isLocked = !!state.settings.terminalLocked;
 
                 if(state.categories.length === 0) {
                     await seedDefaults();
@@ -272,6 +274,25 @@
                     state.settings = newSettings[0] || {};
                 }
                 
+                // Real-time listener for Global Lock State
+                const settingsDocRef = doc(getColRef('settings'), 'app_settings');
+                onSnapshot(settingsDocRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        const newData = docSnap.data();
+                        state.settings = newData;
+                        
+                        // Check if lock state changed externally
+                        const wasLocked = state.isLocked;
+                        state.isLocked = !!newData.terminalLocked;
+                        
+                        if (wasLocked !== state.isLocked) {
+                            renderApp(); // Instantly lock/unlock globally!
+                        }
+                    }
+                }, (error) => {
+                     console.error("Settings snapshot error:", error);
+                });
+
                 updateFavicon(state.settings.logoImage);
                 renderApp();
             } catch(e) {
@@ -435,10 +456,10 @@
                         <!-- Right: Actions -->
                         <div class="flex items-center gap-2 sm:gap-5">
                             
-                            <!-- Language Toggle -->
-                            <button onclick="toggleLang()" class="flex items-center gap-1 bg-white px-2 sm:px-3 py-1.5 sm:py-2 rounded-full font-black text-sm shadow-sm hover:scale-105 transition-all border-b-4 border-gray-200 active:border-b-0 active:translate-y-1">
-                                <span class="text-lg leading-none">${state.lang === 'en' ? '🇱🇦' : '🇺🇸'}</span>
-                                <span class="hidden sm:inline">${state.lang === 'en' ? 'Lao' : 'Eng'}</span>
+                            <!-- Language Toggle (Flags clearly visible on all devices) -->
+                            <button onclick="toggleLang()" class="flex items-center gap-1 sm:gap-2 bg-white px-3 py-1.5 sm:py-2 rounded-full font-black text-sm shadow-sm hover:scale-105 transition-all border-b-4 border-gray-200 active:border-b-0 active:translate-y-1">
+                                <span class="text-xl sm:text-2xl leading-none">${state.lang === 'en' ? '🇱🇦' : '🇺🇸'}</span>
+                                <span class="inline">${state.lang === 'en' ? 'Lao' : 'Eng'}</span>
                             </button>
 
                             <button onclick="promptAdmin()" class="bg-white text-mcRed px-4 py-2 rounded-full font-black text-sm sm:text-base shadow-sm hover:bg-gray-100 hover:scale-105 transition-all flex items-center gap-2 border-b-4 border-gray-200 active:border-b-0 active:translate-y-1 hidden sm:flex">
@@ -883,7 +904,7 @@
                         <i data-lucide="lock" class="w-10 h-10 text-mcRed"></i>
                     </div>
                     <h2 class="text-2xl font-black mb-2 tracking-widest text-mcYellow">LOCK TERMINAL</h2>
-                    <p class="text-gray-400 font-bold mb-6 text-sm">Enter admin code to activate Kiosk Mode.</p>
+                    <p class="text-gray-400 font-bold mb-6 text-sm">Enter admin code to globally lock all kiosks.</p>
                     <input type="password" id="lock_pin_input" class="w-full text-center text-3xl tracking-[1em] p-4 bg-gray-800 border-2 border-gray-700 rounded-2xl mb-6 focus:border-mcRed focus:outline-none font-mono text-white" placeholder="****" autocomplete="off">
                     <div class="flex gap-4">
                         <button onclick="closeModal()" class="flex-1 bg-gray-700 text-white font-black text-xl py-4 rounded-full shadow-lg hover:bg-gray-600 transition-transform">CANCEL</button>
@@ -894,13 +915,12 @@
             setTimeout(() => document.getElementById('lock_pin_input').focus(), 100);
         }
 
-        function lockTerminal() {
+        async function lockTerminal() {
             const pin = document.getElementById('lock_pin_input').value;
             if(pin === state.settings.adminPin) {
-                localStorage.setItem('terminal_locked', 'true');
-                state.isLocked = true;
+                state.settings.terminalLocked = true;
+                await dbPut('settings', state.settings); // Sync globally
                 closeModal();
-                renderApp();
             } else {
                 alert("ACCESS DENIED");
             }
@@ -923,13 +943,12 @@
             setTimeout(() => document.getElementById('unlock_pin_input').focus(), 100);
         }
 
-        function unlockTerminal() {
+        async function unlockTerminal() {
             const pin = document.getElementById('unlock_pin_input').value;
             if(pin === state.settings.adminPin) {
-                localStorage.removeItem('terminal_locked');
-                state.isLocked = false;
+                state.settings.terminalLocked = false;
+                await dbPut('settings', state.settings); // Sync globally
                 closeModal();
-                renderApp();
             } else {
                 alert("ACCESS DENIED");
             }
@@ -1415,6 +1434,15 @@
         // ==========================================
         // 7d. ADMIN: SETTINGS & BACKUP
         // ==========================================
+        window.updateAdminPin = async function(inputId) {
+            const securityCode = prompt("Enter the security code!");
+            if (securityCode === "10061988Jef") {
+                await saveSetting('adminPin', inputId);
+            } else if (securityCode !== null) {
+                alert("Incorrect security code!");
+            }
+        };
+
         function renderAdminSettings(container) {
             container.innerHTML = `
                 <h2 class="text-3xl font-black text-gray-800 mb-8">System Settings</h2>
@@ -1427,7 +1455,7 @@
                             <label class="block font-bold text-gray-600 mb-2 text-sm uppercase tracking-wider">Admin PIN Code</label>
                             <div class="flex gap-2">
                                 <input type="text" id="s_pin" value="${state.settings.adminPin}" class="flex-1 p-3 border-2 border-gray-300 rounded-xl font-mono text-lg font-bold text-center" placeholder="0000">
-                                <button onclick="saveSetting('adminPin', 's_pin')" class="bg-gray-900 text-white px-6 rounded-xl font-black hover:bg-black transition">Update</button>
+                                <button onclick="updateAdminPin('s_pin')" class="bg-gray-900 text-white px-6 rounded-xl font-black hover:bg-black transition">Update</button>
                             </div>
                         </div>
 
