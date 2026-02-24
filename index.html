@@ -54,7 +54,7 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, doc, setDoc, getDocs, deleteDoc, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        import { getStorage, ref, uploadString, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
+        import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
 
         // ==========================================
         // 1. FIREBASE CONFIGURATION & INIT
@@ -265,12 +265,12 @@
             document.getElementById('modal-container').innerHTML = '';
         }
 
-        // Image Compressor (Significantly speeds up uploading to Firebase)
-        window.compressImage = function(file, maxWidth, maxHeight, quality, callback) {
-            const reader = new FileReader();
-            reader.onload = function(e) {
+        // Extremely fast image compressor using Blob and Object URLs
+        window.compressImageToBlob = function(file, maxWidth, maxHeight, quality) {
+            return new Promise((resolve, reject) => {
                 const img = new Image();
-                img.onload = function() {
+                img.onload = () => {
+                    URL.revokeObjectURL(img.src); // Free up browser memory instantly
                     const canvas = document.createElement('canvas');
                     let width = img.width;
                     let height = img.height;
@@ -284,12 +284,16 @@
                     canvas.height = height;
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, width, height);
-                    // Return highly optimized Base64
-                    callback(canvas.toDataURL('image/jpeg', quality));
-                }
-                img.src = e.target.result;
-            }
-            reader.readAsDataURL(file);
+                    
+                    // Convert directly to Blob for fast upload
+                    canvas.toBlob((blob) => {
+                        resolve(blob);
+                    }, 'image/jpeg', quality);
+                };
+                img.onerror = reject;
+                // createObjectURL is instantly read by the browser unlike slow Base64 string conversions
+                img.src = URL.createObjectURL(file); 
+            });
         };
 
         // Parse categories into groups based on naming convention "Main (Sub)"
@@ -401,9 +405,9 @@
             let featuredHtml = '';
             if (featured.length > 0) {
                 featuredHtml = `
-                    <div class="w-full px-4 sm:px-6 lg:px-8 py-10">
+                    <div class="w-full px-4 sm:px-6 lg:px-8 py-10 max-w-[1400px] mx-auto">
                         <h3 class="text-3xl font-black text-gray-900 mb-6 border-l-8 border-mcRed pl-4">Featured Items</h3>
-                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 sm:gap-6">
+                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6 justify-center place-content-center">
                             ${featured.map(p => generateProductCard(p)).join('')}
                         </div>
                     </div>
@@ -411,7 +415,7 @@
             }
 
             return `
-                <div class="w-full px-4 sm:px-6 lg:px-8 py-6">
+                <div class="w-full px-4 sm:px-6 lg:px-8 py-6 max-w-[1400px] mx-auto">
                     <div class="bg-mcRed rounded-[2rem] overflow-hidden shadow-2xl relative flex flex-col md:flex-row items-center justify-between border-b-[8px] sm:border-b-[12px] border-mcYellow mb-8">
                         <div class="p-8 sm:p-12 md:p-16 z-10 text-center md:text-left flex-1">
                             <h2 class="text-mcYellow text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-black mb-2 tracking-tighter leading-none" style="font-family: 'Arial Black', sans-serif;">LOVIN' IT.</h2>
@@ -481,7 +485,7 @@
 
             let productsGridHtml = filteredProducts.length > 0 
                 ? filteredProducts.map(p => generateProductCard(p)).join('')
-                : `<div class="col-span-full py-20 text-center text-gray-500 font-bold text-2xl flex flex-col items-center"><i data-lucide="package-open" class="w-24 h-24 mb-4 text-gray-300"></i>No products found in this selection.</div>`;
+                : `<div class="col-span-full py-20 text-center text-gray-500 font-bold text-2xl flex flex-col items-center w-full"><i data-lucide="package-open" class="w-24 h-24 mb-4 text-gray-300"></i>No products found in this selection.</div>`;
 
             return `
                 <div class="bg-yellow-100 shadow-inner sticky top-[113px] sm:top-[72px] z-30 border-b-2 border-yellow-200">
@@ -497,8 +501,8 @@
                     </div>
                 </div>` : ''}
 
-                <div class="w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8 flex-1">
-                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-4 sm:gap-6">
+                <div class="w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8 flex-1 max-w-[1400px] mx-auto">
+                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6 justify-center place-content-center">
                         ${productsGridHtml}
                     </div>
                 </div>
@@ -521,26 +525,26 @@
 
         function generateProductCard(p) {
             const sizeSelectStr = p.sizes && p.sizes.trim().length > 0 ? `
-                <div class="mb-3 mt-auto">
+                <div class="mb-3 mt-auto w-full">
                     <select id="size-${p.id}" class="w-full p-2 bg-gray-50 border-2 border-gray-200 rounded-xl font-bold text-sm focus:border-mcYellow focus:outline-none appearance-none">
                         ${p.sizes.split(',').map(s => `<option value="${s.trim()}">${s.trim()}</option>`).join('')}
                     </select>
                 </div>
-            ` : '<div class="mt-auto"></div>';
+            ` : '<div class="mt-auto w-full"></div>';
 
             const imgHtml = p.image 
                 ? `<div class="w-full h-64 sm:h-80 bg-white flex items-center justify-center p-2 border-b-2 border-gray-100 overflow-hidden"><img src="${p.image}" class="w-full h-full object-contain drop-shadow-md"></div>`
                 : `<div class="w-full h-64 sm:h-80 bg-gray-50 flex items-center justify-center border-b-2 border-gray-100"><i data-lucide="image" class="w-24 h-24 sm:w-32 sm:h-32 text-gray-200"></i></div>`;
 
             return `
-                <div class="bg-white rounded-[2rem] overflow-hidden shadow-lg border-2 border-transparent hover:border-mcRed hover:shadow-2xl transition-all duration-300 flex flex-col group page-transition">
+                <div class="bg-white rounded-[2rem] overflow-hidden shadow-lg border-2 border-transparent hover:border-mcRed hover:shadow-2xl transition-all duration-300 flex flex-col group page-transition w-full">
                     ${imgHtml}
-                    <div class="p-4 flex flex-col flex-1">
-                        <h3 class="font-extrabold text-sm sm:text-base leading-tight mb-2 text-gray-900 group-hover:text-mcRed transition-colors line-clamp-2">${p.name}</h3>
+                    <div class="p-4 flex flex-col flex-1 items-start text-left">
+                        <h3 class="font-extrabold text-sm sm:text-base leading-tight mb-2 text-gray-900 group-hover:text-mcRed transition-colors line-clamp-2 w-full">${p.name}</h3>
                         <div class="text-mcRed font-bold text-lg mb-4 drop-shadow-sm">${formatLAKManual(p.price)}</div>
                         
                         ${sizeSelectStr}
-                        <div class="pt-2">
+                        <div class="pt-2 w-full">
                             <button onclick="addToCart('${p.id}')" class="w-full bg-mcYellow text-black font-extrabold text-sm sm:text-base py-3 rounded-2xl shadow-[0_4px_0_rgba(200,150,0,1)] hover:shadow-[0_2px_0_rgba(200,150,0,1)] hover:translate-y-[2px] active:shadow-none active:translate-y-[4px] transition-all flex justify-center items-center gap-2">
                                 <i data-lucide="plus" class="w-5 h-5 stroke-[3]"></i> ADD
                             </button>
@@ -1125,9 +1129,9 @@
                             <label class="block font-extrabold text-gray-700 mb-2">Product Photo</label>
                             <div class="flex items-center gap-4">
                                 <label class="cursor-pointer bg-gray-100 border-2 border-dashed border-gray-300 hover:bg-gray-200 transition p-4 rounded-xl flex flex-col items-center justify-center w-full relative">
-                                    <i data-lucide="upload-cloud" class="w-8 h-8 text-gray-500 mb-2"></i>
+                                    <i data-lucide="upload-cloud" class="w-8 h-8 text-gray-500 mb-2" id="p_image_preview_loading_icon"></i>
                                     <span class="text-sm font-bold text-gray-600" id="p_image_preview_loading_text">Select Image File</span>
-                                    <span id="p_image_preview_loading" class="hidden text-sm font-bold text-blue-600 mt-1 absolute bottom-2"><i class="lucide-loader animate-spin inline w-4 h-4"></i> Compressing & Uploading...</span>
+                                    <span id="p_image_preview_loading" class="hidden text-sm font-bold text-blue-600 mt-1 absolute bottom-2"><i class="lucide-loader animate-spin inline w-4 h-4"></i> Uploading...</span>
                                     <input type="file" accept="image/*" class="hidden" onchange="handleImageUpload(this, 'p_image_preview', 'products')">
                                 </label>
                             </div>
@@ -1143,39 +1147,50 @@
             `);
         }
 
-        // Fast Firebase direct upload using compressed data
+        // Fast Firebase direct upload using ultra-fast Blob compression
         window.handleImageUpload = async function(input, previewId, pathPrefix) {
             if (input.files && input.files[0]) {
                 const file = input.files[0];
                 const preview = document.getElementById(previewId);
                 const hiddenInput = document.getElementById(previewId.replace('_preview', '_url'));
                 const loadingText = document.getElementById(previewId + '_loading');
+                const originalText = document.getElementById(previewId + '_loading_text');
+                const uploadIcon = document.getElementById(previewId + '_loading_icon');
 
+                // 1. Show UI Loading states
                 if(loadingText) loadingText.classList.remove('hidden');
+                if(originalText) originalText.classList.add('hidden');
+                if(uploadIcon) uploadIcon.classList.add('hidden');
 
-                // Compress the image before uploading to keep Firebase Storage fast and limits low
-                window.compressImage(file, 800, 800, 0.7, async (compressedBase64) => {
-                    try {
-                        const safeName = file.name.replace(/[^a-zA-Z0-9]/g, '');
-                        const storageRef = ref(storage, `${pathPrefix}/${Date.now()}_${safeName}.jpg`);
-                        
-                        // Upload the highly optimized Base64 image
-                        await uploadString(storageRef, compressedBase64, 'data_url');
-                        const url = await getDownloadURL(storageRef);
+                // 2. Instantly show local preview without blocking UI
+                if(preview) {
+                    preview.src = URL.createObjectURL(file);
+                    preview.classList.remove('hidden');
+                }
 
-                        if(preview) {
-                            preview.src = url;
-                            preview.classList.remove('hidden');
-                        }
-                        if(hiddenInput) hiddenInput.value = url;
-                        showToast("Image Optimized & Uploaded! 📸");
-                    } catch(e) {
-                        alert("Upload failed. Error: " + e.message);
-                        console.error(e);
-                    } finally {
-                        if(loadingText) loadingText.classList.add('hidden');
-                    }
-                });
+                try {
+                    // 3. Compress locally into Blob (Removes lag)
+                    const compressedBlob = await window.compressImageToBlob(file, 800, 800, 0.7);
+                    
+                    // 4. Upload bytes directly to Firebase
+                    const safeName = file.name.replace(/[^a-zA-Z0-9]/g, '');
+                    const storageRef = ref(storage, `${pathPrefix}/${Date.now()}_${safeName}.jpg`);
+                    
+                    await uploadBytes(storageRef, compressedBlob);
+                    const url = await getDownloadURL(storageRef);
+
+                    // 5. Store ready URL
+                    if(hiddenInput) hiddenInput.value = url;
+                    showToast("Upload Successful! ✅");
+                } catch(e) {
+                    alert("Upload failed. Error: " + e.message);
+                    console.error(e);
+                } finally {
+                    // Reset UI
+                    if(loadingText) loadingText.classList.add('hidden');
+                    if(originalText) originalText.classList.remove('hidden');
+                    if(uploadIcon) uploadIcon.classList.remove('hidden');
+                }
             }
         };
 
@@ -1340,8 +1355,8 @@
                                 <button onclick="saveSettingRawAndLogo('logoImage', document.getElementById('s_logo_url').value)" class="text-mcRed hover:text-red-700">Save Logo</button>
                             </label>
                             <label class="cursor-pointer block border-2 border-dashed border-gray-300 bg-white hover:bg-gray-100 p-4 rounded-xl text-center transition relative">
-                                <i data-lucide="image" class="w-8 h-8 mx-auto text-gray-400 mb-2"></i>
-                                <span class="text-sm font-bold text-gray-600">Upload Image File</span>
+                                <i data-lucide="image" class="w-8 h-8 mx-auto text-gray-400 mb-2" id="s_logo_preview_loading_icon"></i>
+                                <span class="text-sm font-bold text-gray-600" id="s_logo_preview_loading_text">Upload Image File</span>
                                 <span id="s_logo_preview_loading" class="hidden text-sm font-bold text-blue-600 mt-1 absolute bottom-2 left-0 right-0"><i class="lucide-loader animate-spin inline w-4 h-4"></i> Uploading...</span>
                                 <input type="file" accept="image/*" class="hidden" onchange="handleImageUpload(this, 's_logo_preview', 'settings')">
                             </label>
@@ -1368,8 +1383,8 @@
                                 <button onclick="saveSettingRaw('bcelQrImage', document.getElementById('s_qr_url').value)" class="text-mcRed hover:text-red-700">Save QR</button>
                             </label>
                             <label class="cursor-pointer block border-2 border-dashed border-gray-300 bg-white hover:bg-gray-100 p-4 rounded-xl text-center transition relative">
-                                <i data-lucide="qr-code" class="w-8 h-8 mx-auto text-gray-400 mb-2"></i>
-                                <span class="text-sm font-bold text-gray-600">Upload Image File</span>
+                                <i data-lucide="qr-code" class="w-8 h-8 mx-auto text-gray-400 mb-2" id="s_qr_preview_loading_icon"></i>
+                                <span class="text-sm font-bold text-gray-600" id="s_qr_preview_loading_text">Upload Image File</span>
                                 <span id="s_qr_preview_loading" class="hidden text-sm font-bold text-blue-600 mt-1 absolute bottom-2 left-0 right-0"><i class="lucide-loader animate-spin inline w-4 h-4"></i> Uploading...</span>
                                 <input type="file" accept="image/*" class="hidden" onchange="handleImageUpload(this, 's_qr_preview', 'settings')">
                             </label>
