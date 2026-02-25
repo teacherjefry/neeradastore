@@ -103,6 +103,7 @@
             { id: 'cat_su_k', name: 'School Uniforms (K1 - K3)' },
             { id: 'cat_su_p', name: 'School Uniforms (P1 - P5)' },
             { id: 'cat_su_s', name: 'School Uniforms (S1 - S7)' },
+            { id: 'cat_acc', name: 'Accessories' },
             { id: 'cat_pe_pk', name: 'PE Uniforms (Pre-K)' },
             { id: 'cat_pe_k', name: 'PE Uniforms (K1 - K3)' },
             { id: 'cat_pe_p', name: 'PE Uniforms (P1 - P5)' },
@@ -121,7 +122,7 @@
             orders: [],
             cart: [],
             currentView: localStorage.getItem('neerada_view') || 'home', 
-            activeMainGroup: localStorage.getItem('neerada_group') || null,
+            activeMainGroup: localStorage.getItem('neerada_group') || 'all',
             activeCategory: localStorage.getItem('neerada_cat') || 'all_in_group',
             searchQuery: '',
             isAdmin: localStorage.getItem('neerada_admin') === 'true',
@@ -134,7 +135,7 @@
 
         // Helper to consistently sort categories globally (Kindergarten -> Primary -> Secondary)
         function sortCategoriesArray(arr) {
-            const hierarchy = ['Pre-K', 'K1 - K3', 'Kindergarten', 'P1 - P5', 'Primary', 'S1 - S7', 'Secondary'];
+            const hierarchy = ['Pre-K', 'K1 - K3', 'Kindergarten', 'P1 - P5', 'Primary', 'S1 - S7', 'Secondary', 'Accessories'];
             return arr.sort((a, b) => {
                 let nA = a.name || a.subName || '';
                 let nB = b.name || b.subName || '';
@@ -203,7 +204,7 @@
         const catTrans = {
             'School Uniforms': 'ເຄື່ອງແບບນັກຮຽນ', 'PE Uniforms': 'ເຄື່ອງແບບພະລະ',
             'Lao Books': 'ປຶ້ມພາສາລາວ', 'English Books': 'ປຶ້ມພາສາອັງກິດ', 'Notebooks': 'ປຶ້ມຂຽນ',
-            'Pre-K': 'ກຽມອະນຸບານ', 'K1 - K3': 'ອະນຸບານ 1-3', 'P1 - P5': 'ປະຖົມ 1-5', 'S1 - S7': 'ມັດທະຍົມ 1-7', 'Kindergarten': 'ອະນຸບານ', 'Primary': 'ປະຖົມ', 'Secondary': 'ມັດທະຍົມ', 'General': 'ທົ່ວໄປ'
+            'Pre-K': 'ກຽມອະນຸບານ', 'K1 - K3': 'ອະນຸບານ 1-3', 'P1 - P5': 'ປະຖົມ 1-5', 'S1 - S7': 'ມັດທະຍົມ 1-7', 'Kindergarten': 'ອະນຸບານ', 'Primary': 'ປະຖົມ', 'Secondary': 'ມັດທະຍົມ', 'Accessories': 'ອຸປະກອນເສີມ', 'General': 'ທົ່ວໄປ'
         };
 
         const t = (key) => i18n[state.lang][key] || key;
@@ -373,10 +374,9 @@
             state.searchQuery = ''; // clear search on navigation
             localStorage.setItem('neerada_view', view);
             if (view === 'products') {
-                const groups = Object.keys(getCategoryGroups());
-                if (!state.activeMainGroup && groups.length > 0) {
-                    state.activeMainGroup = groups[0];
-                    localStorage.setItem('neerada_group', groups[0]);
+                if (!state.activeMainGroup) {
+                    state.activeMainGroup = 'all';
+                    localStorage.setItem('neerada_group', 'all');
                 }
             }
             renderApp();
@@ -459,7 +459,7 @@
         }
 
         // ==========================================
-        // MOBILE MENU DRAWER HTML
+        // UNIVERSAL MENU DRAWER HTML (MOBILE & DESKTOP)
         // ==========================================
         function getMobileMenuHtml() {
             if (!state.isMobileMenuOpen) return '';
@@ -467,7 +467,13 @@
             const groups = getCategoryGroups();
             const groupNames = Object.keys(groups);
             
-            let categoriesHtml = groupNames.map(g => {
+            let categoriesHtml = `
+                <div class="flex flex-col mb-4">
+                    <button onclick="navigate('products'); setMainGroup('all'); toggleMobileMenu();" class="text-left font-black text-lg ${state.activeMainGroup === 'all' && state.currentView === 'products' ? 'text-mcRed' : 'text-gray-700'} hover:text-mcRed transition-colors">${t('all_items')}</button>
+                </div>
+            `;
+            
+            categoriesHtml += groupNames.map(g => {
                 const isGroupActive = state.activeMainGroup === g;
                 let subHtml = '';
                 
@@ -492,7 +498,7 @@
             }).join('');
 
             return `
-                <div class="fixed inset-0 z-[9999] flex md:hidden">
+                <div class="fixed inset-0 z-[9999] flex">
                     <div class="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onclick="toggleMobileMenu()"></div>
                     <div class="relative w-[85%] max-w-sm bg-white h-full shadow-2xl flex flex-col overflow-hidden animate-slideIn">
                         <div class="p-5 border-b-[6px] border-mcYellow bg-mcRed flex justify-between items-center shrink-0">
@@ -562,25 +568,22 @@
                 <header class="bg-mcRed sticky top-0 z-40 shadow-xl border-b-[6px] border-mcYellow">
                     <div class="w-full px-4 sm:px-6 lg:px-8 py-3 flex justify-between items-center h-[70px] sm:h-[80px]">
                         
-                        <!-- Mobile Hamburger -->
-                        <button onclick="toggleMobileMenu()" class="md:hidden text-white hover:text-mcYellow p-1 mr-2 transition-colors">
-                            <i data-lucide="menu" class="w-8 h-8"></i>
-                        </button>
+                        <!-- Left Group: Hamburger + Brand -->
+                        <div class="flex items-center gap-2 sm:gap-4 overflow-hidden">
+                            <!-- Hamburger Menu (Always Visible) -->
+                            <button onclick="toggleMobileMenu()" class="text-white hover:text-mcYellow p-1 shrink-0 transition-colors">
+                                <i data-lucide="menu" class="w-8 h-8"></i>
+                            </button>
 
-                        <!-- Brand -->
-                        <div class="flex items-center gap-2 sm:gap-4 cursor-pointer group flex-1 md:flex-none" onclick="navigate('home')">
-                            <div class="group-hover:rotate-12 transition-transform duration-300">${logoHtml}</div>
-                            <h1 class="text-mcYellow text-lg sm:text-3xl font-black tracking-widest drop-shadow-md whitespace-nowrap uppercase truncate" style="font-family: 'Arial Black', sans-serif;">NEERADA<span class="hidden sm:inline"> STORE</span></h1>
-                        </div>
-
-                        <!-- Center: Desktop Links -->
-                        <div class="hidden md:flex items-center gap-8 font-black text-lg text-white">
-                            <button onclick="navigate('home')" class="${state.currentView==='home'?'text-mcYellow border-b-4 border-mcYellow py-1':'hover:text-mcYellow py-1 border-b-4 border-transparent'} transition-all">${t('home')}</button>
-                            <button onclick="navigate('products')" class="${state.currentView==='products'?'text-mcYellow border-b-4 border-mcYellow py-1':'hover:text-mcYellow py-1 border-b-4 border-transparent'} transition-all">${t('products')}</button>
+                            <!-- Brand -->
+                            <div class="flex items-center gap-2 sm:gap-4 cursor-pointer group overflow-hidden" onclick="navigate('home')">
+                                <div class="group-hover:rotate-12 transition-transform duration-300 shrink-0">${logoHtml}</div>
+                                <h1 class="text-mcYellow text-[1.3rem] sm:text-3xl font-black tracking-wide sm:tracking-widest drop-shadow-md whitespace-nowrap truncate" style="font-family: 'Arial Black', sans-serif;">NEERADA STORE</h1>
+                            </div>
                         </div>
 
                         <!-- Right: Actions -->
-                        <div class="flex items-center gap-3 sm:gap-5">
+                        <div class="flex items-center gap-3 sm:gap-5 ml-auto shrink-0">
                             
                             <!-- Language Toggle (Flags clearly visible on all devices) -->
                             <button onclick="toggleLang()" class="flex items-center gap-2 bg-white px-2 py-1.5 sm:px-3 sm:py-2.5 rounded-full font-black text-sm shadow-[0_4px_0_rgba(0,0,0,0.1)] hover:scale-105 transition-all active:shadow-none active:translate-y-[4px] border-2 border-gray-100">
@@ -604,7 +607,7 @@
                     </div>
                 </header>
 
-                <!-- Mobile Drawer Menu -->
+                <!-- Universal Drawer Menu -->
                 ${getMobileMenuHtml()}
 
                 <!-- Dynamic Content -->
@@ -752,44 +755,7 @@
         window.updateSearch = updateSearch;
 
         function getProductsHTML() {
-            const groups = getCategoryGroups();
-            const groupNames = Object.keys(groups);
-
-            let mainPillsHtml = groupNames.map(g => {
-                const isActive = state.activeMainGroup === g;
-                return `<button onclick="setMainGroup('${g}')" class="whitespace-nowrap px-6 py-3.5 rounded-full font-black text-sm sm:text-base border-[3px] transition-all ${isActive ? 'bg-mcRed text-white border-mcRed shadow-[0_4px_0_rgba(150,0,0,1)] translate-y-[-2px]' : 'bg-white text-gray-800 border-gray-200 hover:border-mcRed hover:text-mcRed shadow-sm'}">${tCat(g)}</button>`;
-            }).join('');
-
-            let subPillsHtml = '';
-            if (state.activeMainGroup && groups[state.activeMainGroup]) {
-                
-                groups[state.activeMainGroup] = sortCategoriesArray(groups[state.activeMainGroup]);
-
-                const isAllActive = state.activeCategory === 'all_in_group';
-                subPillsHtml += `<button onclick="setSubCategory('all_in_group')" class="whitespace-nowrap px-5 py-2.5 rounded-full font-bold text-sm border-2 transition-all ${isAllActive ? 'bg-mcYellow text-black border-mcYellow shadow-sm scale-105' : 'bg-white text-gray-600 border-gray-200 hover:border-mcYellow hover:bg-yellow-50'}">${t('all_items')} ${tCat(state.activeMainGroup)}</button>`;
-                
-                groups[state.activeMainGroup].forEach(sub => {
-                    const isActive = state.activeCategory === sub.id;
-                    subPillsHtml += `<button onclick="setSubCategory('${sub.id}')" class="whitespace-nowrap px-5 py-2.5 rounded-full font-bold text-sm border-2 transition-all ${isActive ? 'bg-mcYellow text-black border-mcYellow shadow-sm scale-105' : 'bg-white text-gray-600 border-gray-200 hover:border-mcYellow hover:bg-yellow-50'}">${tCat(sub.subName)}</button>`;
-                });
-            }
-
             return `
-                <!-- Hidden on mobile because it's inside the hamburger menu -->
-                <div class="hidden md:block bg-yellow-100 shadow-inner sticky top-[115px] sm:top-[80px] z-30 border-b-[4px] border-mcYellow">
-                    <div class="w-full px-4 sm:px-6 lg:px-8 py-3 sm:py-4 flex gap-3 sm:gap-4 overflow-x-auto no-scrollbar items-center md:justify-center">
-                        ${mainPillsHtml}
-                    </div>
-                </div>
-
-                <!-- Hidden on mobile because it's inside the hamburger menu -->
-                ${subPillsHtml ? `
-                <div class="hidden md:block bg-white shadow-md border-b-2 border-gray-100 sticky top-[182px] sm:top-[153px] z-20">
-                    <div class="w-full px-4 sm:px-6 lg:px-8 py-3 flex gap-2 sm:gap-3 overflow-x-auto no-scrollbar items-center md:justify-center">
-                        ${subPillsHtml}
-                    </div>
-                </div>` : ''}
-
                 <!-- Always visible universal search -->
                 <div class="w-full px-4 sm:px-6 lg:px-8 py-6 pb-2 max-w-[1400px] mx-auto flex justify-center mt-4 md:mt-0">
                     <div class="relative w-full max-w-lg">
@@ -974,7 +940,6 @@
                         <div class="bg-mcYellow text-black font-black text-4xl py-3 px-6 rounded-2xl border-4 border-black inline-block shadow-[4px_4px_0_rgba(0,0,0,1)] transform -rotate-2">
                             ${formatLAKManual(total)}
                         </div>
-                        <p class="text-sm text-blue-700 mt-5 font-bold text-balance bg-blue-50 p-3 rounded-xl border-2 border-blue-100">${t('send_whatsapp_prompt')}</p>
                     </div>
                 </div>
             ` : `<div class="text-red-500 font-bold p-4 bg-red-50 rounded-xl mt-4 border-2 border-red-200"><i data-lucide="alert-circle" class="mx-auto mb-2 w-8 h-8"></i>QR Code not set by Admin. Please use COD.</div>`;
@@ -1003,6 +968,9 @@
                     </div>
                 </div>
                 <div class="p-6 bg-white border-t-[4px] border-gray-200 shrink-0">
+                    <div class="text-sm font-bold text-blue-700 bg-blue-50 p-4 rounded-xl border-2 border-blue-100 mb-4 text-center text-balance shadow-inner">
+                        <i data-lucide="info" class="inline w-5 h-5 mr-1 -mt-0.5"></i> ${t('send_whatsapp_prompt')}
+                    </div>
                     <button onclick="submitOrder(this)" class="w-full bg-[#25D366] text-white font-black text-2xl py-5 rounded-2xl shadow-[0_6px_0_rgba(20,160,70,1)] hover:translate-y-[2px] hover:shadow-[0_4px_0_rgba(20,160,70,1)] active:shadow-none active:translate-y-[6px] transition-all flex justify-center items-center gap-3 uppercase tracking-wider">
                         <i data-lucide="message-circle" class="w-8 h-8 text-white fill-current"></i> ${t('order_whatsapp')}
                     </button>
@@ -1063,8 +1031,7 @@
                           `*Items / ລາຍການ:*\n${itemsSummary}\n` +
                           `*Total / ລວມທັງໝົດ:* ${formatLAKManual(total)}\n` +
                           `*Payment / ການຊຳລະເງິນ:* ${payEng} / ${payLao}\n\n` +
-                          `_EN: Please send the payment receipt via WhatsApp to confirm and process your order._\n` +
-                          `_LA: ກະລຸນາສົ່ງໃບບິນການຊຳລະເງິນທາງ WhatsApp ເພື່ອຢືນຢັນ ແລະ ດຳເນີນການສັ່ງຊື້ຂອງທ່ານ._`;
+                          `_Thank you / ຂໍຂອບໃຈ_`;
                 
                 const encodedMsg = encodeURIComponent(msg);
                 const waNumber = (state.settings.whatsappNumber || '8562000000000').replace(/[^0-9]/g, '');
@@ -1579,8 +1546,9 @@
                 });
             }
         };
+        window.handleImageUpload = handleImageUpload;
 
-        window.saveProduct = async function(e, id) {
+        async function saveProduct(e, id) {
             e.preventDefault();
             
             const btn = document.getElementById('save_product_btn');
