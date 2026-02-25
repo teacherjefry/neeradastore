@@ -22,6 +22,15 @@
                     },
                     fontFamily: {
                         sans: ['"Noto Sans Lao"', 'Arial', 'Helvetica', 'sans-serif'],
+                    },
+                    keyframes: {
+                        slideIn: {
+                            '0%': { transform: 'translateX(-100%)' },
+                            '100%': { transform: 'translateX(0)' }
+                        }
+                    },
+                    animation: {
+                        slideIn: 'slideIn 0.3s ease-out forwards'
                     }
                 }
             }
@@ -56,7 +65,7 @@
     <div class="fixed top-0 left-0 w-full h-64 bg-mcRed -z-10 rounded-b-[100px] shadow-lg"></div>
 
     <!-- Main App Container -->
-    <div id="app" class="flex-1 flex flex-col w-full z-10"></div>
+    <div id="app" class="flex-1 flex flex-col w-full z-10 relative"></div>
 
     <!-- Modals Container -->
     <div id="modal-container" class="z-50 relative"></div>
@@ -117,7 +126,8 @@
             searchQuery: '',
             isAdmin: localStorage.getItem('neerada_admin') === 'true',
             isLocked: false, 
-            lang: localStorage.getItem('neerada_lang') || 'en'
+            lang: localStorage.getItem('neerada_lang') || 'en',
+            isMobileMenuOpen: false
         };
 
         const formatLAKManual = (num) => Number(num).toLocaleString('en-US') + ' LAK';
@@ -136,7 +146,6 @@
             });
         }
 
-        // Helper to format number input with commas
         function formatNumberInput(input) {
             let val = input.value.replace(/[^0-9]/g, '');
             if (val.length > 0) {
@@ -213,6 +222,11 @@
             }
         }
         window.toggleLang = toggleLang;
+
+        window.toggleMobileMenu = function() {
+            state.isMobileMenuOpen = !state.isMobileMenuOpen;
+            renderApp();
+        };
 
         // ==========================================
         // 3. DATABASE LAYER
@@ -445,6 +459,68 @@
         }
 
         // ==========================================
+        // MOBILE MENU DRAWER HTML
+        // ==========================================
+        function getMobileMenuHtml() {
+            if (!state.isMobileMenuOpen) return '';
+            
+            const groups = getCategoryGroups();
+            const groupNames = Object.keys(groups);
+            
+            let categoriesHtml = groupNames.map(g => {
+                const isGroupActive = state.activeMainGroup === g;
+                let subHtml = '';
+                
+                if (isGroupActive && state.currentView === 'products') {
+                    const sortedSubs = sortCategoriesArray([...groups[g]]);
+                    subHtml = `
+                        <div class="ml-4 mt-3 flex flex-col gap-3 border-l-[3px] border-gray-200 pl-4">
+                            <button onclick="setSubCategory('all_in_group'); toggleMobileMenu();" class="text-left text-sm ${state.activeCategory === 'all_in_group' ? 'text-mcRed font-black' : 'text-gray-500 font-bold'} hover:text-mcRed transition-colors">${t('all_items')} ${tCat(g)}</button>
+                            ${sortedSubs.map(sub => `
+                                <button onclick="setSubCategory('${sub.id}'); toggleMobileMenu();" class="text-left text-sm ${state.activeCategory === sub.id ? 'text-mcRed font-black' : 'text-gray-500 font-bold'} hover:text-mcRed transition-colors">${tCat(sub.subName)}</button>
+                            `).join('')}
+                        </div>
+                    `;
+                }
+
+                return `
+                    <div class="flex flex-col mb-4">
+                        <button onclick="navigate('products'); setMainGroup('${g}');" class="text-left font-black text-lg ${isGroupActive && state.currentView === 'products' ? 'text-mcRed' : 'text-gray-700'} hover:text-mcRed transition-colors">${tCat(g)}</button>
+                        ${subHtml}
+                    </div>
+                `;
+            }).join('');
+
+            return `
+                <div class="fixed inset-0 z-[9999] flex md:hidden">
+                    <div class="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onclick="toggleMobileMenu()"></div>
+                    <div class="relative w-[85%] max-w-sm bg-white h-full shadow-2xl flex flex-col overflow-hidden animate-slideIn">
+                        <div class="p-5 border-b-[6px] border-mcYellow bg-mcRed flex justify-between items-center shrink-0">
+                            <div class="flex items-center gap-3">
+                                <div class="bg-mcYellow rounded-full p-2"><i data-lucide="store" class="w-6 h-6 text-mcRed"></i></div>
+                                <h2 class="text-mcYellow font-black tracking-widest uppercase text-xl" style="font-family: 'Arial Black', sans-serif;">MENU</h2>
+                            </div>
+                            <button onclick="toggleMobileMenu()" class="text-white hover:text-mcYellow p-1 transition-colors"><i data-lucide="x" class="w-8 h-8"></i></button>
+                        </div>
+                        <div class="flex-1 overflow-y-auto p-6 flex flex-col gap-6">
+                            <button onclick="navigate('home'); toggleMobileMenu();" class="block w-full text-left font-black text-2xl transition-colors ${state.currentView==='home'?'text-mcRed':'text-gray-900 hover:text-mcRed'}">${t('home')}</button>
+                            
+                            <div class="border-t-[4px] border-gray-100 pt-6">
+                                <button onclick="navigate('products'); toggleMobileMenu();" class="block w-full text-left font-black text-2xl mb-6 transition-colors ${state.currentView==='products' && !state.activeMainGroup ?'text-mcRed':'text-gray-900 hover:text-mcRed'}">${t('products')}</button>
+                                <div class="pl-2">
+                                    ${categoriesHtml}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="p-6 border-t-[6px] border-gray-100 bg-gray-50 shrink-0">
+                            <button onclick="promptAdmin(); toggleMobileMenu();" class="w-full bg-gray-900 text-white font-black py-4 rounded-xl flex justify-center items-center gap-2 hover:bg-black transition-colors uppercase tracking-widest"><i data-lucide="user" class="w-5 h-5"></i> ${t('login')}</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // ==========================================
         // 5. MAIN APP ROUTER & SHELL
         // ==========================================
         function renderApp() {
@@ -474,8 +550,8 @@
             }
 
             const logoHtml = state.settings.logoImage 
-                ? `<img src="${state.settings.logoImage}" class="h-12 w-12 sm:h-14 sm:w-14 bg-white rounded-full p-1 shadow-md object-contain border-2 border-mcYellow">` 
-                : `<div class="bg-mcYellow rounded-full p-2 shadow-md border-2 border-white"><i data-lucide="store" class="text-mcRed w-8 h-8 sm:w-10 sm:h-10"></i></div>`;
+                ? `<img src="${state.settings.logoImage}" class="h-10 w-10 sm:h-14 sm:w-14 bg-white rounded-full p-1 shadow-md object-contain border-2 border-mcYellow">` 
+                : `<div class="bg-mcYellow rounded-full p-2 shadow-md border-2 border-white"><i data-lucide="store" class="text-mcRed w-6 h-6 sm:w-10 sm:h-10"></i></div>`;
 
             let mainContent = '';
             if (state.currentView === 'home') mainContent = getHomeHTML();
@@ -484,11 +560,17 @@
             app.innerHTML = `
                 <!-- Top Navigation Shell -->
                 <header class="bg-mcRed sticky top-0 z-40 shadow-xl border-b-[6px] border-mcYellow">
-                    <div class="w-full px-4 sm:px-6 lg:px-8 py-3 flex justify-between items-center h-[80px]">
-                        <!-- Left: Brand -->
-                        <div class="flex items-center gap-3 sm:gap-4 cursor-pointer group" onclick="navigate('home')">
+                    <div class="w-full px-4 sm:px-6 lg:px-8 py-3 flex justify-between items-center h-[70px] sm:h-[80px]">
+                        
+                        <!-- Mobile Hamburger -->
+                        <button onclick="toggleMobileMenu()" class="md:hidden text-white hover:text-mcYellow p-1 mr-2 transition-colors">
+                            <i data-lucide="menu" class="w-8 h-8"></i>
+                        </button>
+
+                        <!-- Brand -->
+                        <div class="flex items-center gap-2 sm:gap-4 cursor-pointer group flex-1 md:flex-none" onclick="navigate('home')">
                             <div class="group-hover:rotate-12 transition-transform duration-300">${logoHtml}</div>
-                            <h1 class="text-mcYellow text-2xl sm:text-3xl font-black tracking-widest drop-shadow-md whitespace-nowrap uppercase" style="font-family: 'Arial Black', sans-serif;">NEERADA STORE</h1>
+                            <h1 class="text-mcYellow text-lg sm:text-3xl font-black tracking-widest drop-shadow-md whitespace-nowrap uppercase truncate" style="font-family: 'Arial Black', sans-serif;">NEERADA<span class="hidden sm:inline"> STORE</span></h1>
                         </div>
 
                         <!-- Center: Desktop Links -->
@@ -500,33 +582,30 @@
                         <!-- Right: Actions -->
                         <div class="flex items-center gap-3 sm:gap-5">
                             
-                            <!-- Language Toggle -->
-                            <button onclick="toggleLang()" class="flex items-center gap-2 bg-white px-3 py-2 sm:py-2.5 rounded-full font-black text-sm shadow-[0_4px_0_rgba(0,0,0,0.1)] hover:scale-105 transition-all active:shadow-none active:translate-y-[4px] border-2 border-gray-100">
+                            <!-- Language Toggle (Flags clearly visible on all devices) -->
+                            <button onclick="toggleLang()" class="flex items-center gap-2 bg-white px-2 py-1.5 sm:px-3 sm:py-2.5 rounded-full font-black text-sm shadow-[0_4px_0_rgba(0,0,0,0.1)] hover:scale-105 transition-all active:shadow-none active:translate-y-[4px] border-2 border-gray-100">
                                 <span class="flex items-center justify-center overflow-hidden rounded-[2px] shadow-[0_1px_2px_rgba(0,0,0,0.2)]">
                                     ${state.lang === 'en' 
                                         ? '<img src="https://flagcdn.com/w40/la.png" class="w-6 sm:w-7 object-cover" alt="LA">' 
                                         : '<img src="https://flagcdn.com/w40/us.png" class="w-6 sm:w-7 object-cover" alt="US">'}
                                 </span>
-                                <span class="inline text-gray-800">${state.lang === 'en' ? 'Lao' : 'Eng'}</span>
+                                <span class="hidden sm:inline text-gray-800">${state.lang === 'en' ? 'Lao' : 'Eng'}</span>
                             </button>
 
                             <button onclick="promptAdmin()" class="bg-white text-mcRed px-5 py-2.5 rounded-full font-black text-sm sm:text-base shadow-[0_4px_0_rgba(0,0,0,0.1)] hover:scale-105 transition-all flex items-center gap-2 active:shadow-none active:translate-y-[4px] hidden sm:flex border-2 border-gray-100">
                                 <i data-lucide="user" class="w-5 h-5"></i> ${t('login')}
                             </button>
                             
-                            <button onclick="openCart()" class="relative bg-mcYellow text-black p-3.5 rounded-full hover:bg-yellow-400 shadow-[0_4px_0_rgba(200,150,0,1)] hover:translate-y-[2px] hover:shadow-[0_2px_0_rgba(200,150,0,1)] active:shadow-none active:translate-y-[4px] transition-all border-2 border-transparent hover:border-white">
+                            <button onclick="openCart()" class="relative bg-mcYellow text-black p-3 sm:p-3.5 rounded-full hover:bg-yellow-400 shadow-[0_4px_0_rgba(200,150,0,1)] hover:translate-y-[2px] hover:shadow-[0_2px_0_rgba(200,150,0,1)] active:shadow-none active:translate-y-[4px] transition-all border-2 border-transparent hover:border-white">
                                 <i data-lucide="shopping-cart" class="w-6 h-6"></i>
-                                <span id="cart-badge" class="absolute -top-2 -right-2 bg-black text-mcYellow text-xs font-black w-7 h-7 rounded-full flex items-center justify-center hidden border-2 border-mcYellow shadow-lg">0</span>
+                                <span id="cart-badge" class="absolute -top-2 -right-2 bg-black text-mcYellow text-xs font-black w-6 h-6 sm:w-7 sm:h-7 rounded-full flex items-center justify-center hidden border-2 border-mcYellow shadow-lg">0</span>
                             </button>
                         </div>
                     </div>
-                    <!-- Mobile Links Row -->
-                    <div class="md:hidden flex bg-red-900 text-white font-black text-sm shadow-inner justify-around border-t-2 border-red-950">
-                        <button onclick="navigate('home')" class="py-3.5 flex-1 text-center ${state.currentView==='home'?'bg-mcYellow text-black':''}">${t('home')}</button>
-                        <button onclick="navigate('products')" class="py-3.5 flex-1 text-center border-l-2 border-red-800 ${state.currentView==='products'?'bg-mcYellow text-black':''}">${t('products')}</button>
-                        <button onclick="promptAdmin()" class="py-3.5 flex-1 text-center border-l-2 border-red-800">${t('login')}</button>
-                    </div>
                 </header>
+
+                <!-- Mobile Drawer Menu -->
+                ${getMobileMenuHtml()}
 
                 <!-- Dynamic Content -->
                 <main class="w-full flex-1 flex flex-col page-transition z-10 bg-transparent">
@@ -696,20 +775,23 @@
             }
 
             return `
-                <div class="bg-yellow-100 shadow-inner sticky top-[115px] sm:top-[80px] z-30 border-b-[4px] border-mcYellow">
+                <!-- Hidden on mobile because it's inside the hamburger menu -->
+                <div class="hidden md:block bg-yellow-100 shadow-inner sticky top-[115px] sm:top-[80px] z-30 border-b-[4px] border-mcYellow">
                     <div class="w-full px-4 sm:px-6 lg:px-8 py-3 sm:py-4 flex gap-3 sm:gap-4 overflow-x-auto no-scrollbar items-center md:justify-center">
                         ${mainPillsHtml}
                     </div>
                 </div>
 
+                <!-- Hidden on mobile because it's inside the hamburger menu -->
                 ${subPillsHtml ? `
-                <div class="bg-white shadow-md border-b-2 border-gray-100 sticky top-[182px] sm:top-[153px] z-20">
+                <div class="hidden md:block bg-white shadow-md border-b-2 border-gray-100 sticky top-[182px] sm:top-[153px] z-20">
                     <div class="w-full px-4 sm:px-6 lg:px-8 py-3 flex gap-2 sm:gap-3 overflow-x-auto no-scrollbar items-center md:justify-center">
                         ${subPillsHtml}
                     </div>
                 </div>` : ''}
 
-                <div class="w-full px-4 sm:px-6 lg:px-8 py-6 pb-2 max-w-[1400px] mx-auto flex justify-center">
+                <!-- Always visible universal search -->
+                <div class="w-full px-4 sm:px-6 lg:px-8 py-6 pb-2 max-w-[1400px] mx-auto flex justify-center mt-4 md:mt-0">
                     <div class="relative w-full max-w-lg">
                         <i data-lucide="search" class="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-6 h-6"></i>
                         <input type="text" id="searchInput" onkeyup="updateSearch(this.value)" value="${state.searchQuery || ''}" placeholder="${t('search_placeholder')}" class="w-full pl-12 pr-4 py-3 sm:py-4 rounded-full border-[4px] border-gray-200 focus:border-mcYellow outline-none font-bold text-gray-700 shadow-sm transition-colors text-lg">
